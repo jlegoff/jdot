@@ -3,6 +3,7 @@
 package main
 
 import (
+	"github.com/jlegoff/jdot/nrinfrareceiver"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/extension"
@@ -26,6 +27,7 @@ func components() (component.Factories, error) {
 
 	factories.Receivers, err = receiver.MakeFactoryMap(
 		otlpreceiver.NewFactory(),
+		nrinfrareceiver.NewFactory(),
 	)
 	if err != nil {
 		return component.Factories{}, err

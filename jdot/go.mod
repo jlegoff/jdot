@@ -15,6 +15,10 @@ require (
 	golang.org/x/sys v0.3.0
 )
 
+replace (
+  github.com/jlegoff/jdot/nrinfrareceiver => ../nrinfrareceiver
+)
+
 require (
 	contrib.go.opencensus.io/exporter/prometheus v0.4.2 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect

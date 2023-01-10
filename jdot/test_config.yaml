@@ -1,0 +1,15 @@
+receivers:
+  nrinfra:
+
+processors:
+
+exporters:
+  logging:
+    logLevel: debug
+
+service:
+  pipelines:
+    metrics:
+      receivers: [nrinfra]
+      processors: []
+      exporters: [logging]
