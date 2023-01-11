@@ -1,15 +1,35 @@
 receivers:
   nrinfra:
+  hostmetrics:
+    collection_interval: 20s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
 
 processors:
+  batch:
+  resource:
+    attributes:
+      - action: upsert
+        key: host.name
+        value: wat
 
 exporters:
   logging:
     logLevel: debug
+  otlp:
+    endpoint: staging-otlp.nr-data.net:4317
+    headers:
+      api-key: $API_KEY
+  file:
+    path: /tmp/wat.json
+    format: json
 
 service:
   pipelines:
     metrics:
-      receivers: [nrinfra]
-      processors: []
-      exporters: [logging]
+      receivers: [nrinfra, hostmetrics]
+      processors: [batch]
+      exporters: [otlp, logging, file]

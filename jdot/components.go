@@ -13,6 +13,9 @@ import (
 	otlpexporter "go.opentelemetry.io/collector/exporter/otlpexporter"
 	batchprocessor "go.opentelemetry.io/collector/processor/batchprocessor"
 	otlpreceiver "go.opentelemetry.io/collector/receiver/otlpreceiver"
+	filexporter "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/fileexporter"
+	hostmetricsreceiver "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/hostmetricsreceiver"
+	resourceprocessor "github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourceprocessor"
 )
 
 func components() (component.Factories, error) {
@@ -28,6 +31,7 @@ func components() (component.Factories, error) {
 	factories.Receivers, err = receiver.MakeFactoryMap(
 		otlpreceiver.NewFactory(),
 		nrinfrareceiver.NewFactory(),
+		hostmetricsreceiver.NewFactory(),
 	)
 	if err != nil {
 		return component.Factories{}, err
@@ -36,6 +40,7 @@ func components() (component.Factories, error) {
 	factories.Exporters, err = exporter.MakeFactoryMap(
 		loggingexporter.NewFactory(),
 		otlpexporter.NewFactory(),
+		filexporter.NewFactory(),
 	)
 	if err != nil {
 		return component.Factories{}, err
@@ -43,6 +48,7 @@ func components() (component.Factories, error) {
 
 	factories.Processors, err = processor.MakeFactoryMap(
 		batchprocessor.NewFactory(),
+		resourceprocessor.NewFactory(),
 	)
 	if err != nil {
 		return component.Factories{}, err
