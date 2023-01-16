@@ -13,7 +13,6 @@ const (
 	stability         = component.StabilityLevelBeta
 )
 
-// NewFactory creates a factory for tailtracer receiver.
 func NewFactory() receiver.Factory {
 	return receiver.NewFactory(typeStr,
 		createDefaultConfig,
