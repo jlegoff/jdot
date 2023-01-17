@@ -6,23 +6,25 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/pdata/pmetric"
+	"go.uber.org/zap"
 )
 
 type nrInfraExporter struct {
 	config *Config
+	logger *zap.Logger
 }
 
 func (pe *nrInfraExporter) Capabilities() consumer.Capabilities {
 	return consumer.Capabilities{MutatesData: false}
 }
 
-func (pe *nrInfraExporter) ConsumeMetrics(ctx context.Context, md pmetric.Metrics) error {
-	fmt.Println("Received ", md.MetricCount(), " metrics")
+func (nrInfraExporter *nrInfraExporter) ConsumeMetrics(ctx context.Context, md pmetric.Metrics) error {
+	nrInfraExporter.logger.Info(fmt.Sprintf("Received %d metrics", md.MetricCount()))
 	return nil
 }
 
-func (pe *nrInfraExporter) Start(_ context.Context, host component.Host) error {
-	fmt.Println("Starting the infra exporter")
+func (nrInfraExporter *nrInfraExporter) Start(_ context.Context, host component.Host) error {
+	nrInfraExporter.logger.Info("Starting the infra exporter")
 	return nil
 }
 

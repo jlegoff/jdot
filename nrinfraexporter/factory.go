@@ -26,10 +26,10 @@ func createInfraExporter(
 	params exporter.CreateSettings,
 	rConf component.Config,
 ) (exporter.Metrics, error) {
-
 	nrInfraExporterCfg := rConf.(*Config)
 	nrInfraExporter := &nrInfraExporter{
 		config: nrInfraExporterCfg,
+		logger: params.Logger,
 	}
 	return nrInfraExporter, nil
 }

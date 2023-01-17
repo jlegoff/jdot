@@ -38,6 +38,8 @@ func createMetrics(entities []Entities) pmetric.Metrics {
 				m := ms.AppendEmpty()
 				m.SetName(createMetricName(event.EventType, sampleMetricName))
 				dp := m.SetEmptyGauge().DataPoints().AppendEmpty()
+				dp.Attributes().PutStr("newrelic.infraEventType", event.EventType)
+				dp.Attributes().PutStr("newrelic.infraMetricName", sampleMetricName)
 				for attrName, attrValue := range event.Attributes {
 					dp.Attributes().PutStr(attrName, attrValue.(string))
 				}

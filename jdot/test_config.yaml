@@ -1,12 +1,5 @@
 receivers:
   nrinfra:
-  hostmetrics:
-    collection_interval: 20s
-    scrapers:
-      cpu:
-        metrics:
-          system.cpu.utilization:
-            enabled: true
 
 processors:
   batch:
@@ -26,10 +19,12 @@ exporters:
   file:
     path: /tmp/wat.json
     format: json
+  nrinfra:
+    license_key: abc
 
 service:
   pipelines:
     metrics:
-      receivers: [nrinfra, hostmetrics]
+      receivers: [nrinfra]
       processors: [batch]
-      exporters: [otlp, logging, file]
+      exporters: [nrinfra, logging, file]
