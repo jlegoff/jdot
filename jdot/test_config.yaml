@@ -20,7 +20,7 @@ exporters:
     path: /tmp/wat.json
     format: json
   nrinfra:
-    license_key: abc
+    license_key: $API_KEY
 
 service:
   pipelines:

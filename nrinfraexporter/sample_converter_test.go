@@ -143,10 +143,10 @@ func TestConvertTwoSamples(t *testing.T) {
 	addMetric(ms, "network.receivePacketsPerSecond", "NetworkSample", "receivePacketsPerSecond",
 		attrs, []TestDataPoint{{Timestamp: now, Value: 4}})
 
-	AllSamples := ConvertMetrics(metrics)
-	assert.Equal(t, 1, len(AllSamples.EntitySamples))
+	allSamples := ConvertMetrics(metrics)
+	assert.Equal(t, 1, len(allSamples.EntitySamples))
 
-	entitySamples, entityFound := AllSamples.EntitySamples[entityId]
+	entitySamples, entityFound := allSamples.EntitySamples[entityId]
 	assert.True(t, entityFound)
 	assert.Equal(t, 2, len(entitySamples.Samples))
 

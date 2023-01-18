@@ -20,6 +20,8 @@ func (pe *nrInfraExporter) Capabilities() consumer.Capabilities {
 
 func (nrInfraExporter *nrInfraExporter) ConsumeMetrics(ctx context.Context, md pmetric.Metrics) error {
 	nrInfraExporter.logger.Info(fmt.Sprintf("Received %d metrics", md.MetricCount()))
+	samples := ConvertMetrics(md)
+	SendEvents("https://staging-infra-api.newrelic.com", nrInfraExporter.config.LicenseKey, samples)
 	return nil
 }
 
