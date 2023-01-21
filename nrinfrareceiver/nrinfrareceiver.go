@@ -7,6 +7,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.uber.org/zap"
+	"os"
 	"os/exec"
 )
 
@@ -25,15 +26,24 @@ func (nrinfraReceiver *nrinfraReceiver) Start(ctx context.Context, host componen
 	ctx, nrinfraReceiver.cancel = context.WithCancel(ctx)
 	nrinfraReceiver.ctx = ctx
 
-	go nrinfraReceiver.runAgent()
+	agentPath := os.Getenv("NRIA_AGENT_PATH")
+	if agentPath == "" {
+		agentPath = "newrelic-infra"
+	}
+
+	agentConfig := os.Getenv("NRIA_CONFIG_PATH")
+	if agentConfig == "" {
+		agentConfig = "newrelic-infra.yml"
+	}
+	go nrinfraReceiver.runAgent(agentPath, agentConfig)
 
 	nrinfraReceiver.logger.Info("I should start processing metrics now!")
 	return nil
 }
 
-func (nrinfraReceiver *nrinfraReceiver) runAgent() {
+func (nrinfraReceiver *nrinfraReceiver) runAgent(agentPath string, configPath string) {
 	// run the agent as a binary!
-	cmd := exec.Command("sh", "-c", "./newrelic-infra --config data/nrinfra/config/newrelic-infra.yaml")
+	cmd := exec.Command("sh", "-c", fmt.Sprintf("./%s --config %s", agentPath, configPath))
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		fmt.Println("Error reading from stdout", err)
