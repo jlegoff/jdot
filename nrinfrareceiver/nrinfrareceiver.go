@@ -33,7 +33,7 @@ func (nrinfraReceiver *nrinfraReceiver) Start(ctx context.Context, host componen
 
 func (nrinfraReceiver *nrinfraReceiver) runAgent() {
 	// run the agent as a binary!
-	cmd := exec.Command("sh", "-c", "cd /Users/jlegoff/code/infrastructure-agent/dist/darwin-newrelic-infra_darwin_arm64; ./newrelic-infra --config /etc/newrelic-infra.yaml")
+	cmd := exec.Command("sh", "-c", "./newrelic-infra --config data/nrinfra/config/newrelic-infra.yaml")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		fmt.Println("Error reading from stdout", err)
