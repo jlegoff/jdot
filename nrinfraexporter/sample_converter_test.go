@@ -15,6 +15,7 @@ func TestConvertSystemSampleOneDataPoint(t *testing.T) {
 	metrics := pmetric.NewMetrics()
 	resourceMetrics := metrics.ResourceMetrics().AppendEmpty()
 	resourceMetrics.Resource().Attributes().PutInt("EntityId", entityId)
+	resourceMetrics.Resource().Attributes().PutStr("resourceKey", "resourceValue")
 	ms := resourceMetrics.ScopeMetrics().AppendEmpty().Metrics()
 
 	attrs := map[string]string{
@@ -52,6 +53,10 @@ func TestConvertSystemSampleOneDataPoint(t *testing.T) {
 		attrSample, foundAttrSample := sample["attrKey"]
 		assert.True(t, foundAttrSample)
 		assert.Equal(t, "attrValue", attrSample)
+
+		resourceSample, foundResourceSample := sample["resourceKey"]
+		assert.True(t, foundResourceSample)
+		assert.Equal(t, "resourceValue", resourceSample)
 
 		_, foundEventTypeAttr := sample["newrelic.infraEventType"]
 		assert.False(t, foundEventTypeAttr)

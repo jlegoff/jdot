@@ -3,6 +3,7 @@ package nrinfraexporter
 import (
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -25,7 +26,7 @@ type EntitySamples struct {
 
 type Sample map[string]interface{}
 
-func (entitySamples *EntitySamples) AddDataPoint(dp pmetric.NumberDataPoint) {
+func (entitySamples *EntitySamples) AddDataPoint(resource pcommon.Resource, dp pmetric.NumberDataPoint) {
 	eventType, hasEventType := dp.Attributes().Get("newrelic.infraEventType")
 	if !hasEventType {
 		return
@@ -34,7 +35,8 @@ func (entitySamples *EntitySamples) AddDataPoint(dp pmetric.NumberDataPoint) {
 	if !hasEventMetricName {
 		return
 	}
-	identifyingHash := makeHash(eventType.Str(), dp.Timestamp(), dp.Attributes())
+	allAttributes := mergeAttributes(resource, dp)
+	identifyingHash := makeHash(eventType.Str(), dp.Timestamp(), allAttributes)
 	sample, hasSample := entitySamples.Samples[identifyingHash]
 	if !hasSample {
 		sample = make(Sample, 0)
@@ -43,7 +45,8 @@ func (entitySamples *EntitySamples) AddDataPoint(dp pmetric.NumberDataPoint) {
 	sample["timestamp"] = dp.Timestamp().AsTime().Unix()
 	sample["eventType"] = eventType.Str()
 	sample[eventMetricName.Str()] = dp.DoubleValue()
-	dp.Attributes().Range(func(key string, value pcommon.Value) bool {
+
+	allAttributes.Range(func(key string, value pcommon.Value) bool {
 		if key == "newrelic.infraEventType" || key == "newrelic.infraMetricName" {
 			return true
 		}
@@ -61,14 +64,34 @@ func (entitySamples *EntitySamples) AddDataPoint(dp pmetric.NumberDataPoint) {
 	})
 }
 
+func mergeAttributes(resource pcommon.Resource, dp pmetric.NumberDataPoint) pcommon.Map {
+	rawAttrs := dp.Attributes().AsRaw()
+	for key, val := range resource.Attributes().AsRaw() {
+		rawAttrs[key] = val
+	}
+	allAttributes := pcommon.NewMap()
+	allAttributes.FromRaw(rawAttrs)
+	return allAttributes
+}
+
 func makeHash(eventType string, timestamp pcommon.Timestamp, attributes pcommon.Map) string {
 	identifiers := make([]string, 0)
 	identifiers = append(identifiers, eventType)
 	identifiers = append(identifiers, timestamp.String())
+
+	var keys []string
 	attributes.Range(func(key string, value pcommon.Value) bool {
 		if key == "newrelic.infraEventType" || key == "newrelic.infraMetricName" {
 			return true
 		}
+		keys = append(keys, key)
+		return true
+	})
+
+	// sort the keys to make the identifier reproducible
+	sort.Strings(keys)
+	for _, key := range keys {
+		value, _ := attributes.Get(key)
 		var stringValue string
 		switch value.Type() {
 		case pcommon.ValueTypeStr:
@@ -82,8 +105,8 @@ func makeHash(eventType string, timestamp pcommon.Timestamp, attributes pcommon.
 			identifiers = append(identifiers, key)
 			identifiers = append(identifiers, stringValue)
 		}
-		return true
-	})
+
+	}
 	return strings.Join(identifiers, "|")
 }
 
@@ -91,14 +114,14 @@ func newSamples() AllSamples {
 	return AllSamples{EntitySamples: make(map[int64]EntitySamples, 0)}
 }
 
-func (allSamples *AllSamples) AddMetric(entityId int64, metric pmetric.Metric) {
+func (allSamples *AllSamples) AddMetric(entityId int64, resource pcommon.Resource, metric pmetric.Metric) {
 	if metric.Type() != pmetric.MetricTypeGauge {
 		return
 	}
 	entitySamples := allSamples.GetOrCreateSamples(entityId)
 	for i := 0; i < metric.Gauge().DataPoints().Len(); i++ {
 		dp := metric.Gauge().DataPoints().At(i)
-		entitySamples.AddDataPoint(dp)
+		entitySamples.AddDataPoint(resource, dp)
 	}
 }
 
@@ -131,7 +154,7 @@ func ConvertMetrics(metrics pmetric.Metrics) AllSamples {
 		}
 		for j := 0; j < rm.ScopeMetrics().Len(); j++ {
 			for k := 0; k < rm.ScopeMetrics().At(j).Metrics().Len(); k++ {
-				allSamples.AddMetric(entityId, rm.ScopeMetrics().At(j).Metrics().At(k))
+				allSamples.AddMetric(entityId, rm.Resource(), rm.ScopeMetrics().At(j).Metrics().At(k))
 			}
 		}
 
