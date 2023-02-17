@@ -1,4 +1,4 @@
-module github.com/jlegoff/jdot/nrinfraeexporter
+module github.com/jlegoff/jdot/nrinfraexporter
 
 go 1.19
 
