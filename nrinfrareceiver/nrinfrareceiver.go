@@ -43,7 +43,7 @@ func (nrinfraReceiver *nrinfraReceiver) Start(ctx context.Context, host componen
 
 func (nrinfraReceiver *nrinfraReceiver) runAgent(agentPath string, configPath string) {
 	// run the agent as a binary!
-	cmd := exec.Command("sh", "-c", fmt.Sprintf("%s --config %s", agentPath, configPath))
+	cmd := exec.Command("sh", "-c", fmt.Sprintf("%s -config %s", agentPath, configPath))
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		fmt.Println("Error reading from stdout", err)
