@@ -54,13 +54,17 @@ func ConvertTraces(td ptrace.Traces) pmetric.Metrics {
 				metric.SetName("apm.service.transaction.duration")
 				metric.SetUnit("s")
 
-				dp := metric.SetEmptyHistogram().DataPoints().AppendEmpty()
+				histogram := metric.SetEmptyHistogram()
+				histogram.SetAggregationTemporality(pmetric.AggregationTemporalityDelta)
+				dp := histogram.DataPoints().AppendEmpty()
 				dp.SetStartTimestamp(span.StartTimestamp())
 				dp.SetTimestamp(span.EndTimestamp())
 
 				duration := float64((span.EndTimestamp() - span.StartTimestamp()).AsTime().UnixNano()) / 1e9
 				dp.SetSum(duration)
 				dp.SetCount(1)
+				dp.SetMin(duration)
+				dp.SetMax(duration)
 				httpRoute, routePresent := span.Attributes().Get("http.route")
 				if routePresent {
 					method, methodPresent := span.Attributes().Get("http.request.method")
