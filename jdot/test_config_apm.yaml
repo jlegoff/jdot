@@ -12,6 +12,10 @@ exporters:
   file:
     path: /tmp/wat.json
     format: json
+  otlp:
+    endpoint: staging-otlp.nr-data.net:4317
+    headers:
+      api-key: $API_KEY
 
 connectors:
   apmconnector:
@@ -20,7 +24,9 @@ service:
   pipelines:
     traces/in:
       receivers: [otlp]
-      exporters: [apmconnector]
+      processors: [batch]
+      exporters: [apmconnector, otlp]
     metrics/out:
       receivers: [apmconnector]
-      exporters: [file]
+      processors: [batch]
+      exporters: [file, otlp]
