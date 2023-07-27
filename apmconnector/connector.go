@@ -65,7 +65,9 @@ func ConvertTraces(td ptrace.Traces) pmetric.Metrics {
 				dp.SetCount(1)
 				dp.SetMin(duration)
 				dp.SetMax(duration)
+				span.Attributes().CopyTo(dp.Attributes())
 				httpRoute, routePresent := span.Attributes().Get("http.route")
+				dp.Attributes().PutStr("transactionType", "Web")
 				if routePresent {
 					method, methodPresent := span.Attributes().Get("http.request.method")
 					if methodPresent {
