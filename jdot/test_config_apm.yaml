@@ -1,0 +1,32 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+
+processors:
+  batch:
+
+exporters:
+  logging:
+    loglevel: debug
+  file:
+    path: /tmp/wat.json
+    format: json
+  otlp:
+    endpoint: staging-otlp.nr-data.net:4317
+    headers:
+      api-key: $API_KEY
+
+connectors:
+  apmconnector:
+
+service:
+  pipelines:
+    traces/in:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [apmconnector, otlp]
+    metrics/out:
+      receivers: [apmconnector]
+      processors: [batch]
+      exporters: [file, otlp]

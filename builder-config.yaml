@@ -2,15 +2,19 @@ dist:
   name: jdot
   description: "The Julien distribution of the Opentelemetry Collector"
   output_path: ./jdot
-  otelcol_version: 0.69.1
+  otelcol_version: 0.81.0
 exporters:
-  - gomod: go.opentelemetry.io/collector/exporter/loggingexporter v0.69.1
-  - gomod: go.opentelemetry.io/collector/exporter/otlpexporter v0.69.1
-  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/fileexporter v0.69.0
+  - gomod: go.opentelemetry.io/collector/exporter/loggingexporter v0.81.0
+  - gomod: go.opentelemetry.io/collector/exporter/otlpexporter v0.81.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/fileexporter v0.81.0
 
 receivers:
-  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.69.1
+  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.81.0
 
 processors:
-  - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.69.1
-  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourceprocessor v0.69.0
+  - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.81.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourceprocessor v0.81.0
+
+connectors:
+  - gomod: github.com/jlegoff/jdot/apmconnector v0.0.1
+    path: "./apmconnector"

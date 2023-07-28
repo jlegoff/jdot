@@ -1,2 +1,5 @@
 .idea
 jdot/jdot
+jdot/data
+jdot/newrelic-infra
+.DS_Store
