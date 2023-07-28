@@ -61,21 +61,9 @@ func ConvertTraces(td ptrace.Traces) pmetric.Metrics {
 				if span.Kind() != ptrace.SpanKindServer {
 					continue
 				}
-				metric := scopeMetric.Metrics().AppendEmpty()
-				metric.SetName("apm.service.transaction.duration")
-				metric.SetUnit("s")
 
-				histogram := metric.SetEmptyHistogram()
-				histogram.SetAggregationTemporality(pmetric.AggregationTemporalityDelta)
-				dp := histogram.DataPoints().AppendEmpty()
-				dp.SetStartTimestamp(span.StartTimestamp())
-				dp.SetTimestamp(span.EndTimestamp())
-
-				duration := float64((span.EndTimestamp() - span.StartTimestamp()).AsTime().UnixNano()) / 1e9
-				dp.SetSum(duration)
-				dp.SetCount(1)
-				dp.SetMin(duration)
-				dp.SetMax(duration)
+				metric := AddMetric(scopeMetric.Metrics(), "apm.service.transaction.duration")
+				dp := SetHistogramFromSpan(span, metric)
 				span.Attributes().CopyTo(dp.Attributes())
 				dp.Attributes().PutStr("transactionType", "Web")
 				dp.Attributes().PutStr("transactionName", GetTransactionMetricName(span))
@@ -84,6 +72,28 @@ func ConvertTraces(td ptrace.Traces) pmetric.Metrics {
 
 	}
 	return metrics
+}
+
+func AddMetric(metrics pmetric.MetricSlice, metricName string) pmetric.Metric {
+	metric := metrics.AppendEmpty()
+	metric.SetName(metricName)
+	metric.SetUnit("s")
+	return metric
+}
+
+func SetHistogramFromSpan(span ptrace.Span, metric pmetric.Metric) pmetric.HistogramDataPoint {
+	histogram := metric.SetEmptyHistogram()
+	histogram.SetAggregationTemporality(pmetric.AggregationTemporalityDelta)
+	dp := histogram.DataPoints().AppendEmpty()
+	dp.SetStartTimestamp(span.StartTimestamp())
+	dp.SetTimestamp(span.EndTimestamp())
+
+	duration := float64((span.EndTimestamp() - span.StartTimestamp()).AsTime().UnixNano()) / 1e9
+	dp.SetSum(duration)
+	dp.SetCount(1)
+	dp.SetMin(duration)
+	dp.SetMax(duration)
+	return dp
 }
 
 func GetTransactionMetricName(span ptrace.Span) string {
