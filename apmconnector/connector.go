@@ -69,11 +69,14 @@ func ConvertTraces(td ptrace.Traces) pmetric.Metrics {
 				httpRoute, routePresent := span.Attributes().Get("http.route")
 				dp.Attributes().PutStr("transactionType", "Web")
 				if routePresent {
-					method, methodPresent := span.Attributes().Get("http.request.method")
+
+					// http.request.method
+					method, methodPresent := span.Attributes().Get("http.method")
+					// http.route starts with a /
 					if methodPresent {
-						dp.Attributes().PutStr("transactionName", fmt.Sprintf("WebTransaction/http.route/%s %s", httpRoute.Str(), method.Str()))
+						dp.Attributes().PutStr("transactionName", fmt.Sprintf("WebTransaction/http.route%s (%s)", httpRoute.Str(), method.Str()))
 					} else {
-						dp.Attributes().PutStr("transactionName", fmt.Sprintf("WebTransaction/http.route/%s", httpRoute.Str()))
+						dp.Attributes().PutStr("transactionName", fmt.Sprintf("WebTransaction/http.route%s", httpRoute.Str()))
 					}
 				}
 			}
