@@ -24,7 +24,7 @@ func (c *ApmConnector) Capabilities() consumer.Capabilities {
 
 func (c *ApmConnector) ConsumeTraces(ctx context.Context, td ptrace.Traces) error {
 	if c.metricsConsumer != nil {
-		metrics := ConvertTraces(td)
+		metrics := ConvertTraces(c.logger, td)
 		err := c.metricsConsumer.ConsumeMetrics(ctx, metrics)
 		if err != nil {
 			return err
@@ -47,12 +47,13 @@ func (c *ApmConnector) Shutdown(context.Context) error {
 	return nil
 }
 
-func ConvertTraces(td ptrace.Traces) pmetric.Metrics {
+func ConvertTraces(logger *zap.Logger, td ptrace.Traces) pmetric.Metrics {
 	metrics := pmetric.NewMetrics()
 	for i := 0; i < td.ResourceSpans().Len(); i++ {
 		resourceMetrics := metrics.ResourceMetrics().AppendEmpty()
 		rs := td.ResourceSpans().At(i)
 		rs.Resource().CopyTo(resourceMetrics.Resource())
+		sdkLanguage, sdkLanguagePresent := rs.Resource().Attributes().Get("telemetry.sdk.language")
 		for j := 0; j < rs.ScopeSpans().Len(); j++ {
 			scopeSpan := rs.ScopeSpans().At(j)
 			scopeMetric := resourceMetrics.ScopeMetrics().AppendEmpty()
@@ -66,7 +67,21 @@ func ConvertTraces(td ptrace.Traces) pmetric.Metrics {
 				dp := SetHistogramFromSpan(span, metric)
 				span.Attributes().CopyTo(dp.Attributes())
 				dp.Attributes().PutStr("transactionType", "Web")
-				dp.Attributes().PutStr("transactionName", GetTransactionMetricName(span))
+				transactionName := GetTransactionMetricName(span)
+				dp.Attributes().PutStr("transactionName", transactionName)
+
+				overviewWeb := AddMetric(scopeMetric.Metrics(), "apm.service.overview.web")
+				overviewDp := SetHistogramFromSpan(span, overviewWeb)
+				span.Attributes().CopyTo(overviewDp.Attributes())
+				if sdkLanguagePresent {
+					overviewDp.Attributes().PutStr("segmentName", sdkLanguage.AsString())
+
+					txBreakdownMetric := AddMetric(scopeMetric.Metrics(), "apm.service.transaction.overview")
+					txBreakdownDp := SetHistogramFromSpan(span, txBreakdownMetric)
+					span.Attributes().CopyTo(txBreakdownDp.Attributes())
+					txBreakdownDp.Attributes().PutStr("metricTimesliceName", sdkLanguage.AsString())
+					txBreakdownDp.Attributes().PutStr("transactionName", transactionName)
+				}
 			}
 		}
 
