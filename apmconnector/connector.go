@@ -77,22 +77,26 @@ func ConvertTraces(td ptrace.Traces) pmetric.Metrics {
 				dp.SetMin(duration)
 				dp.SetMax(duration)
 				span.Attributes().CopyTo(dp.Attributes())
-				httpRoute, routePresent := span.Attributes().Get("http.route")
 				dp.Attributes().PutStr("transactionType", "Web")
-				if routePresent {
-
-					// http.request.method
-					method, methodPresent := span.Attributes().Get("http.method")
-					// http.route starts with a /
-					if methodPresent {
-						dp.Attributes().PutStr("transactionName", fmt.Sprintf("WebTransaction/http.route%s (%s)", httpRoute.Str(), method.Str()))
-					} else {
-						dp.Attributes().PutStr("transactionName", fmt.Sprintf("WebTransaction/http.route%s", httpRoute.Str()))
-					}
-				}
+				dp.Attributes().PutStr("transactionName", GetTransactionMetricName(span))
 			}
 		}
 
 	}
 	return metrics
+}
+
+func GetTransactionMetricName(span ptrace.Span) string {
+	httpRoute, routePresent := span.Attributes().Get("http.route")
+	if routePresent {
+		// http.request.method
+		method, methodPresent := span.Attributes().Get("http.method")
+		// http.route starts with a /
+		if methodPresent {
+			return fmt.Sprintf("WebTransaction/http.route%s (%s)", httpRoute.Str(), method.Str())
+		} else {
+			return fmt.Sprintf("WebTransaction/http.route%s", httpRoute.Str())
+		}
+	}
+	return "WebTransaction/Other/unknown"
 }
