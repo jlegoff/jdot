@@ -6,4 +6,5 @@ RUN mkdir /collector
 
 COPY ./jdot/jdot /collector
 
-CMD /collector/jdot
+CMD ["/collector/jdot"]
+ENTRYPOINT ["/collector/jdot"]
