@@ -30,7 +30,7 @@ func BuildTransactions(td ptrace.Traces) plog.Logs {
 
 func buildTransaction(lr plog.LogRecord, span ptrace.Span) {
 	lr.Attributes().PutStr("event.domain", "newrelic.otel_collector")
-	lr.Attributes().PutStr("event.type", "Transaction")
+	lr.Attributes().PutStr("event.name", "Transaction")
 
 	httpRoute, routePresent := span.Attributes().Get("http.route")
 	method, methodPresent := span.Attributes().Get("http.method")
