@@ -1,0 +1,9 @@
+FROM golang
+
+RUN apt update -y && apt upgrade -y
+
+RUN mkdir /collector
+
+COPY ./jdot/jdot /collector
+
+CMD /collector/jdot

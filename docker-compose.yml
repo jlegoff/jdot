@@ -1,9 +1,18 @@
 version: "3.6"
 
 services:
-  build:
+  # build the collector
+  build-collector:
     build:
       context: .
+      dockerfile: Dockerfile.build
     command: ocb --config builder-config.yaml
     volumes:
       - .:/collector
+
+  # package the collector into an image to use locally
+  collector:
+    build:
+      context: .
+      dockerfile: Dockerfile.package
+#    command: ocb --config builder-config.yaml
