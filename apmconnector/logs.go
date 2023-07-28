@@ -32,17 +32,8 @@ func buildTransaction(lr plog.LogRecord, span ptrace.Span) {
 	lr.Attributes().PutStr("event.domain", "newrelic.otel_collector")
 	lr.Attributes().PutStr("event.name", "Transaction")
 
-	httpRoute, routePresent := span.Attributes().Get("http.route")
-	method, methodPresent := span.Attributes().Get("http.method")
-	if routePresent {
-		var transactionName string
-		if methodPresent {
-			transactionName = fmt.Sprintf("%s (%s)", httpRoute.AsString(), method.AsString())
-		} else {
-			transactionName = httpRoute.AsString()
-		}
-		lr.Attributes().PutStr("name", transactionName)
-	}
+	lr.Attributes().PutStr("transactionType", "Web")
+	lr.Attributes().PutStr("name", GetTransactionMetricName(span))
 
 	lr.Attributes().PutStr("trace.id", span.TraceID().String())
 	duration := float64((span.EndTimestamp() - span.StartTimestamp()).AsTime().UnixNano()) / 1e9
