@@ -20,6 +20,7 @@ func NewFactory() connector.Factory {
 		typeStr,
 		createDefaultConfig,
 		connector.WithTracesToMetrics(createTracesToMetrics, stability),
+		connector.WithTracesToLogs(createTracesToLogs, stability),
 	)
 }
 
@@ -41,5 +42,21 @@ func createTracesToMetrics(
 		config:          c,
 		metricsConsumer: nextConsumer,
 		logger:          set.Logger,
+	}, nil
+}
+
+// createTracesToMetrics creates a traces to logs connector based on provided config.
+func createTracesToLogs(
+	_ context.Context,
+	set connector.CreateSettings,
+	cfg component.Config,
+	nextConsumer consumer.Logs,
+) (connector.Traces, error) {
+	c := cfg.(*Config)
+
+	return &ApmConnector{
+		config:       c,
+		logsConsumer: nextConsumer,
+		logger:       set.Logger,
 	}, nil
 }

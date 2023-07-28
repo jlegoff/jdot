@@ -30,3 +30,7 @@ service:
       receivers: [apmconnector]
       processors: [batch]
       exporters: [file, otlp]
+    logs/out:
+      receivers: [apmconnector]
+      processors: [batch]
+      exporters: [otlp]

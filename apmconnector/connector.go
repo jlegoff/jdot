@@ -15,6 +15,7 @@ type ApmConnector struct {
 	logger *zap.Logger
 
 	metricsConsumer consumer.Metrics
+	logsConsumer    consumer.Logs
 }
 
 func (c *ApmConnector) Capabilities() consumer.Capabilities {
@@ -22,8 +23,18 @@ func (c *ApmConnector) Capabilities() consumer.Capabilities {
 }
 
 func (c *ApmConnector) ConsumeTraces(ctx context.Context, td ptrace.Traces) error {
-	metrics := ConvertTraces(td)
-	return c.metricsConsumer.ConsumeMetrics(ctx, metrics)
+	if c.metricsConsumer != nil {
+		metrics := ConvertTraces(td)
+		err := c.metricsConsumer.ConsumeMetrics(ctx, metrics)
+		if err != nil {
+			return err
+		}
+	}
+	if c.logsConsumer != nil {
+		logs := BuildTransactions(td)
+		return c.logsConsumer.ConsumeLogs(ctx, logs)
+	}
+	return nil
 }
 
 func (c *ApmConnector) Start(_ context.Context, host component.Host) error {
