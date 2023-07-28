@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func TestProcessOneSpan(t *testing.T) {
+func TestConvertOneSpanToMetrics(t *testing.T) {
 	traces := ptrace.NewTraces()
 	resourceSpans := traces.ResourceSpans().AppendEmpty()
 	resourceSpans.Resource().Attributes().PutStr("service.name", "service")
@@ -25,6 +25,23 @@ func TestProcessOneSpan(t *testing.T) {
 	assert.Equal(t, 1, metrics.MetricCount())
 	dp := metrics.ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics().At(0).Histogram().DataPoints().At(0)
 	assert.Equal(t, 1.0, dp.Sum())
+}
+
+func TestConvertOneSpanToLogs(t *testing.T) {
+	traces := ptrace.NewTraces()
+	resourceSpans := traces.ResourceSpans().AppendEmpty()
+	resourceSpans.Resource().Attributes().PutStr("service.name", "service")
+	scopeSpans := resourceSpans.ScopeSpans().AppendEmpty().Spans()
+	attrs := map[string]string{
+		"attrKey": "attrValue",
+	}
+	end := time.Now()
+	start := end.Add(-time.Second)
+	spanValues := []TestSpan{{Start: start, End: end, Name: "span", Kind: ptrace.SpanKindServer}}
+	addSpan(scopeSpans, attrs, spanValues)
+
+	logs := BuildTransactions(traces)
+	assert.Equal(t, 1, logs.LogRecordCount())
 }
 
 func addSpan(spanSlice ptrace.SpanSlice, attributes map[string]string, spanValues []TestSpan) {
