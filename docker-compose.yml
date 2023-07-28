@@ -1,0 +1,9 @@
+version: "3.6"
+
+services:
+  build:
+    build:
+      context: .
+    command: ocb --config builder-config.yaml
+    volumes:
+      - .:/collector
