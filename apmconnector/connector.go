@@ -89,7 +89,7 @@ func ConvertTraces(logger *zap.Logger, td ptrace.Traces) pmetric.Metrics {
 	return metrics
 }
 
-func ProcessClientSpan(span ptrace.Span, scopeMetric pmetric.ScopeMetrics, sdkLanguage string) {
+func ProcessDatabaseSpan(span ptrace.Span, scopeMetric pmetric.ScopeMetrics, sdkLanguage string) bool {
 	dbSystem, dbSystemPresent := span.Attributes().Get("db.system")
 	if dbSystemPresent {
 		dbOperation, dbOperationPresent := span.Attributes().Get("db.operation")
@@ -102,8 +102,31 @@ func ProcessClientSpan(span ptrace.Span, scopeMetric pmetric.ScopeMetrics, sdkLa
 				dp.Attributes().PutStr("db.operation", dbOperation.AsString())
 				dp.Attributes().PutStr("db.system", dbSystem.AsString())
 				dp.Attributes().PutStr("db.sql.table", dbTable.AsString())
+				return true
 			}
 		}
+	}
+	return false
+}
+
+func ProcessExternalSpan(span ptrace.Span, scopeMetric pmetric.ScopeMetrics, sdkLanguage string) bool {
+	serverAddress, serverAddressPresent := span.Attributes().Get("server.address")
+	if serverAddressPresent {
+		metric := AddMetric(scopeMetric.Metrics(), "apm.service.transaction.external.duration")
+		dp := SetHistogramFromSpan(span, metric)
+		span.Attributes().CopyTo(dp.Attributes())
+		dp.Attributes().PutStr("external.host", serverAddress.AsString())
+
+		// FIXME
+		dp.Attributes().PutStr("transactionType", "Web")
+		return true
+	}
+	return false
+}
+
+func ProcessClientSpan(span ptrace.Span, scopeMetric pmetric.ScopeMetrics, sdkLanguage string) {
+	if !ProcessDatabaseSpan(span, scopeMetric, sdkLanguage) {
+		ProcessExternalSpan(span, scopeMetric, sdkLanguage)
 	}
 }
 
