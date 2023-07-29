@@ -77,13 +77,6 @@ func ConvertTraces(logger *zap.Logger, td ptrace.Traces) pmetric.Metrics {
 						ProcessClientSpan(span, scopeMetric, sdkLanguage)
 					}
 				}
-
-				/*
-					for key, value := range span.Attributes().AsRaw() {
-						fmt.Printf("%s value is %v\n", key, value)
-						logger.Info(key)
-						//			logger.Info(value)
-					}*/
 			}
 		}
 
