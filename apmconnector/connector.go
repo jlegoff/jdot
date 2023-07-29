@@ -62,6 +62,11 @@ func ConvertTraces(logger *zap.Logger, td ptrace.Traces) pmetric.Metrics {
 	for i := 0; i < td.ResourceSpans().Len(); i++ {
 		resourceMetrics := metrics.ResourceMetrics().AppendEmpty()
 		rs := td.ResourceSpans().At(i)
+		instrumentationProvider, instrumentationProviderPresent := rs.Resource().Attributes().Get("instrumentation.provider")
+		if instrumentationProviderPresent && instrumentationProvider.AsString() != "opentelemetry" {
+			logger.Debug("Skipping resource spans", zap.String("instrumentation.provider", instrumentationProvider.AsString()))
+			continue
+		}
 		rs.Resource().CopyTo(resourceMetrics.Resource())
 		sdkLanguage := GetSdkLanguage(rs.Resource().Attributes())
 		for j := 0; j < rs.ScopeSpans().Len(); j++ {
