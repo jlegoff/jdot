@@ -9,49 +9,50 @@ import (
 )
 
 type MetricBuilder interface {
-	// record a new data point
+	// Record a new data point
 	Record(resource pcommon.Resource, scope pcommon.InstrumentationScope, span ptrace.Span)
-	// return the list of created metrics
+	// GetMetrics Return the list of created metrics
 	GetMetrics() pmetric.Metrics
-	// reset the cache
+	// Reset the cache
 	Reset()
 }
 
 type MetricBuilderImpl struct {
-	logger *zap.Logger
-	//metrics map[string]*explicitHistogram
+	logger  *zap.Logger
+	metrics pmetric.Metrics
 }
 
-func ConvertTraces(td ptrace.Traces) pmetric.Metrics {
-	metrics := pmetric.NewMetrics()
-	for i := 0; i < td.ResourceSpans().Len(); i++ {
-		resourceMetrics := metrics.ResourceMetrics().AppendEmpty()
-		rs := td.ResourceSpans().At(i)
-		instrumentationProvider, instrumentationProviderPresent := rs.Resource().Attributes().Get("instrumentation.provider")
-		if instrumentationProviderPresent && instrumentationProvider.AsString() != "opentelemetry" {
-			logger.Debug("Skipping resource spans", zap.String("instrumentation.provider", instrumentationProvider.AsString()))
-			continue
-		}
-		rs.Resource().CopyTo(resourceMetrics.Resource())
-		sdkLanguage := GetSdkLanguage(rs.Resource().Attributes())
-		for j := 0; j < rs.ScopeSpans().Len(); j++ {
-			scopeSpan := rs.ScopeSpans().At(j)
-			scopeMetric := resourceMetrics.ScopeMetrics().AppendEmpty()
-			for k := 0; k < scopeSpan.Spans().Len(); k++ {
-				span := scopeSpan.Spans().At(k)
-				if span.Kind() == ptrace.SpanKindServer {
-					ProcessServerSpan(span, scopeMetric, sdkLanguage)
-				} else if span.Kind() == ptrace.SpanKindClient {
-					// filter out db calls that have no parent (so no transaction)
-					if !span.ParentSpanID().IsEmpty() {
-						ProcessClientSpan(span, scopeMetric, sdkLanguage)
-					}
-				}
-			}
-		}
-
+func NewMetricBuilder(logger *zap.Logger) MetricBuilder {
+	mb := &MetricBuilderImpl{
+		logger: logger,
 	}
-	return metrics
+	mb.Reset()
+	return mb
+}
+
+func (mb *MetricBuilderImpl) Reset() {
+	mb.metrics = pmetric.NewMetrics()
+}
+
+func (mb *MetricBuilderImpl) GetMetrics() pmetric.Metrics {
+	return mb.metrics
+}
+
+func (mb *MetricBuilderImpl) Record(resource pcommon.Resource, scope pcommon.InstrumentationScope, span ptrace.Span) {
+	resourceMetrics := mb.metrics.ResourceMetrics().AppendEmpty()
+	resource.CopyTo(resourceMetrics.Resource())
+	sdkLanguage := GetSdkLanguage(resource.Attributes())
+
+	scopeMetric := resourceMetrics.ScopeMetrics().AppendEmpty()
+	if span.Kind() == ptrace.SpanKindServer {
+		ProcessServerSpan(span, scopeMetric, sdkLanguage)
+	} else if span.Kind() == ptrace.SpanKindClient {
+		// filter out db calls that have no parent (so no transaction)
+		if !span.ParentSpanID().IsEmpty() {
+			ProcessClientSpan(span, scopeMetric, sdkLanguage)
+		}
+	}
+
 }
 
 func GetSdkLanguage(attributes pcommon.Map) string {

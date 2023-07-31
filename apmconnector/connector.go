@@ -20,6 +20,23 @@ type ApmConnector struct {
 	logsConsumer    consumer.Logs
 }
 
+func NewMetricApmConnector(nextConsumer consumer.Metrics, config *Config, logger *zap.Logger) *ApmConnector {
+	return &ApmConnector{
+		config:          config,
+		metricsConsumer: nextConsumer,
+		logger:          logger,
+		metricBuilder:   NewMetricBuilder(logger),
+	}
+}
+
+func NewLoggerApmConnector(nextConsumer consumer.Logs, config *Config, logger *zap.Logger) *ApmConnector {
+	return &ApmConnector{
+		config:       config,
+		logsConsumer: nextConsumer,
+		logger:       logger,
+	}
+}
+
 func (c *ApmConnector) Capabilities() consumer.Capabilities {
 	return consumer.Capabilities{MutatesData: false}
 }
@@ -51,6 +68,11 @@ func (c *ApmConnector) Shutdown(context.Context) error {
 func (c *ApmConnector) ConvertDataPoints(td ptrace.Traces) (pmetric.Metrics, plog.Logs) {
 	for i := 0; i < td.ResourceSpans().Len(); i++ {
 		rs := td.ResourceSpans().At(i)
+		instrumentationProvider, instrumentationProviderPresent := rs.Resource().Attributes().Get("instrumentation.provider")
+		if instrumentationProviderPresent && instrumentationProvider.AsString() != "opentelemetry" {
+			c.logger.Debug("Skipping resource spans", zap.String("instrumentation.provider", instrumentationProvider.AsString()))
+			continue
+		}
 		for j := 0; j < rs.ScopeSpans().Len(); j++ {
 			scopeSpan := rs.ScopeSpans().At(j)
 			for k := 0; k < scopeSpan.Spans().Len(); k++ {
