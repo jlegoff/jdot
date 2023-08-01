@@ -3,11 +3,11 @@ package apmconnector
 import (
 	"crypto"
 	"fmt"
+	"github.com/lightstep/go-expohisto/structure"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.uber.org/zap"
-	"math"
 	"reflect"
 	"sort"
 )
@@ -62,28 +62,44 @@ func addMetric(metric Metric, scopeMetrics pmetric.ScopeMetrics) {
 	histogram := otelMetric.SetEmptyExponentialHistogram()
 	histogram.SetAggregationTemporality(pmetric.AggregationTemporalityDelta)
 	otelDatapoints := histogram.DataPoints()
-	otelDatapoints.EnsureCapacity(len(metric.datapoints))
 	for _, dp := range metric.datapoints {
-		createHistogramDatapoint(histogram, dp)
+		histoDp := otelDatapoints.AppendEmpty()
+		expoHistToExponentialDataPoint(dp.histogram, histoDp)
+		histoDp.SetStartTimestamp(dp.startTimestamp)
+		histoDp.SetTimestamp(dp.timestamp)
 	}
 
 }
 
-func createHistogramDatapoint(histogram pmetric.ExponentialHistogram, dp Datapoint) {
-	otelDatapoints := histogram.DataPoints()
-	otelDatapoint := otelDatapoints.AppendEmpty()
-	otelDatapoint.SetStartTimestamp(dp.span.StartTimestamp())
-	otelDatapoint.SetTimestamp(dp.span.EndTimestamp())
-	dp.span.Attributes().CopyTo(otelDatapoint.Attributes())
-	for k, v := range dp.attributes {
-		otelDatapoint.Attributes().PutStr(k, v)
+// expoHistToExponentialDataPoint copies `lightstep/go-expohisto` structure.Histogram to
+// pmetric.ExponentialHistogramDataPoint
+func expoHistToExponentialDataPoint(agg *structure.Histogram[float64], dp pmetric.ExponentialHistogramDataPoint) {
+	dp.SetCount(agg.Count())
+	dp.SetSum(agg.Sum())
+	if agg.Count() != 0 {
+		dp.SetMin(agg.Min())
+		dp.SetMax(agg.Max())
 	}
-	duration := float64((dp.span.EndTimestamp() - dp.span.StartTimestamp()).AsTime().UnixNano()) / 1e9
-	otelDatapoint.SetSum(otelDatapoint.Sum() + duration)
-	otelDatapoint.SetCount(otelDatapoint.Count() + 1)
-	otelDatapoint.SetMin(math.Min(otelDatapoint.Min(), duration))
-	otelDatapoint.SetMax(math.Max(otelDatapoint.Max(), duration))
-	// FIXME missing scale, zeros, etc.
+
+	dp.SetZeroCount(agg.ZeroCount())
+	dp.SetScale(agg.Scale())
+
+	for _, half := range []struct {
+		inFunc  func() *structure.Buckets
+		outFunc func() pmetric.ExponentialHistogramDataPointBuckets
+	}{
+		{agg.Positive, dp.Positive},
+		{agg.Negative, dp.Negative},
+	} {
+		in := half.inFunc()
+		out := half.outFunc()
+		out.SetOffset(in.Offset())
+		out.BucketCounts().EnsureCapacity(int(in.Len()))
+
+		for i := uint32(0); i < in.Len(); i++ {
+			out.BucketCounts().Append(in.At(i))
+		}
+	}
 }
 
 func (mb *MetricBuilderImpl) Record(resource pcommon.Resource, scope pcommon.InstrumentationScope, span ptrace.Span) {
@@ -116,12 +132,12 @@ func ProcessDatabaseSpan(span ptrace.Span, scopeMetric *ScopeMetrics, sdkLanguag
 		if dbOperationPresent {
 			dbTable, dbTablePresent := span.Attributes().Get("db.sql.table")
 			if dbTablePresent {
-				metric := scopeMetric.GetOrCreateMetric("apm.service.datastore.operation.duration", sdkLanguage)
 				attributes := map[string]string{
 					"db.operation": dbOperation.AsString(),
 					"db.system":    dbSystem.AsString(),
 					"db.sql.table": dbTable.AsString(),
 				}
+				metric := scopeMetric.GetOrCreateMetric("apm.service.datastore.operation.duration", span, attributes)
 				metric.AddDatapoint(span, attributes)
 				return true
 			}
@@ -133,12 +149,12 @@ func ProcessDatabaseSpan(span ptrace.Span, scopeMetric *ScopeMetrics, sdkLanguag
 func ProcessExternalSpan(span ptrace.Span, scopeMetric *ScopeMetrics, sdkLanguage string) bool {
 	serverAddress, serverAddressPresent := span.Attributes().Get("server.address")
 	if serverAddressPresent {
-		metric := scopeMetric.GetOrCreateMetric("apm.service.transaction.external.duration", sdkLanguage)
 		attributes := map[string]string{
 			"external.host": serverAddress.AsString(),
 			// FIXME
 			"transactionType": "Web",
 		}
+		metric := scopeMetric.GetOrCreateMetric("apm.service.transaction.external.duration", span, attributes)
 		metric.AddDatapoint(span, attributes)
 		return true
 	}
@@ -152,24 +168,24 @@ func ProcessClientSpan(span ptrace.Span, scopeMetric *ScopeMetrics, sdkLanguage 
 }
 
 func ProcessServerSpan(span ptrace.Span, scopeMetric *ScopeMetrics, sdkLanguage string) {
-	metric := scopeMetric.GetOrCreateMetric("apm.service.transaction.duration", sdkLanguage)
 	attributes := map[string]string{
 		"transactionType": "Web",
 		"transactionName": GetTransactionMetricName(span),
 	}
+	metric := scopeMetric.GetOrCreateMetric("apm.service.transaction.duration", span, attributes)
 	metric.AddDatapoint(span, attributes)
 
-	overviewWeb := scopeMetric.GetOrCreateMetric("apm.service.overview.web", sdkLanguage)
 	overviewAttributes := map[string]string{
 		"segmentName": sdkLanguage,
 	}
+	overviewWeb := scopeMetric.GetOrCreateMetric("apm.service.overview.web", span, overviewAttributes)
 	overviewWeb.AddDatapoint(span, overviewAttributes)
 
-	txBreakdownMetric := scopeMetric.GetOrCreateMetric("apm.service.transaction.overview", sdkLanguage)
 	txBreakdownAttributes := map[string]string{
 		"metricTimesliceName": sdkLanguage,
 		"transactionName":     GetTransactionMetricName(span),
 	}
+	txBreakdownMetric := scopeMetric.GetOrCreateMetric("apm.service.transaction.overview", span, txBreakdownAttributes)
 	txBreakdownMetric.AddDatapoint(span, txBreakdownAttributes)
 }
 
@@ -195,7 +211,7 @@ func NewMetrics() AllMetrics {
 }
 
 func (allMetrics *AllMetrics) GetOrCreateResource(resource pcommon.Resource) *ResourceMetrics {
-	key := GetKey(resource.Attributes())
+	key := GetKeyFromMap(resource.Attributes())
 	res, resourcePresent := (*allMetrics)[key]
 	if resourcePresent {
 		return res
@@ -214,7 +230,7 @@ type ResourceMetrics struct {
 }
 
 func (rm *ResourceMetrics) GetOrCreateScope(scope pcommon.InstrumentationScope) *ScopeMetrics {
-	key := GetKey(scope.Attributes())
+	key := GetKeyFromMap(scope.Attributes())
 	scopeMetrics, scopeMetricsPresent := rm.scopeMetrics[key]
 	if scopeMetricsPresent {
 		return scopeMetrics
@@ -232,44 +248,79 @@ type ScopeMetrics struct {
 	metrics map[string]*Metric
 }
 
-func (sm *ScopeMetrics) GetOrCreateMetric(metricName string, sdkLanguage string) *Metric {
-	key := metricName
+func (sm *ScopeMetrics) GetOrCreateMetric(metricName string, span ptrace.Span, attributes map[string]string) *Metric {
 	metric, metricPresent := sm.metrics[metricName]
 	if metricPresent {
 		return metric
 	}
 	metric = &Metric{
-		metricName:  metricName,
-		sdkLanguage: sdkLanguage,
-		datapoints:  make([]Datapoint, 0),
+		metricName: metricName,
+		datapoints: make(map[string]Datapoint),
 	}
-	sm.metrics[key] = metric
+	sm.metrics[metricName] = metric
 	return metric
 }
 
 type Metric struct {
-	datapoints  []Datapoint
-	sdkLanguage string
-	metricName  string
+	datapoints map[string]Datapoint
+	metricName string
 }
 
-func (m *Metric) AddDatapoint(span ptrace.Span, attributes map[string]string) {
-	m.datapoints = append(m.datapoints, Datapoint{span: span, attributes: attributes})
+func (m *Metric) AddDatapoint(span ptrace.Span, dimensions map[string]string) {
+	attributes := make(map[string]string)
+	for k, v := range dimensions {
+		attributes[k] = v
+	}
+	span.Attributes().Range(func(k string, v pcommon.Value) bool {
+		attributes[k] = v.AsString()
+		return true
+	})
+
+	dp, dpPresent := m.datapoints[GetKey(attributes)]
+	if !dpPresent {
+		histogram := new(structure.Histogram[float64])
+		histogram.Init(structure.NewConfig())
+		dp = Datapoint{histogram: histogram, attributes: attributes, startTimestamp: span.StartTimestamp(), timestamp: span.EndTimestamp()}
+		m.datapoints[GetKey(attributes)] = dp
+	}
+	duration := float64((span.EndTimestamp() - span.StartTimestamp()).AsTime().UnixNano()) / 1e9
+	dp.histogram.Update(duration)
+	if dp.startTimestamp.AsTime().After(span.StartTimestamp().AsTime()) {
+		dp.startTimestamp = span.StartTimestamp()
+	}
+	if dp.timestamp.AsTime().Before(span.EndTimestamp().AsTime()) {
+		dp.timestamp = span.EndTimestamp()
+	}
 }
 
 type Datapoint struct {
-	span       ptrace.Span
-	attributes map[string]string
+	histogram      *structure.Histogram[float64]
+	attributes     map[string]string
+	startTimestamp pcommon.Timestamp
+	timestamp      pcommon.Timestamp
 }
 
-func GetKey(m pcommon.Map) string {
-	allKeys := make([]string, m.Len())
-	m.Range(func(k string, v pcommon.Value) bool {
-		allKeys = append(allKeys, k)
+func GetKeyFromMap(pMap pcommon.Map) string {
+	m := make(map[string]string, pMap.Len())
+	pMap.Range(func(k string, v pcommon.Value) bool {
+		m[k] = v.AsString()
 		return true
 	})
+	return GetKey(m)
+}
+
+func GetKey(m map[string]string) string {
+	allKeys := make([]string, len(m))
+	for k, _ := range m {
+		allKeys = append(allKeys, k)
+	}
 	sort.Strings(allKeys)
-	return Hash(allKeys)
+	toHash := make([]string, 2*len(m))
+	for k, v := range m {
+		toHash = append(toHash, k)
+		toHash = append(toHash, v)
+	}
+	return Hash(toHash)
 }
 
 func Hash(objs []string) string {
