@@ -1,12 +1,15 @@
 package apmconnector
 
 import (
+	"crypto"
 	"fmt"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.uber.org/zap"
 	"math"
+	"reflect"
+	"sort"
 )
 
 type MetricBuilder interface {
@@ -192,8 +195,7 @@ func NewMetrics() AllMetrics {
 }
 
 func (allMetrics *AllMetrics) GetOrCreateResource(resource pcommon.Resource) *ResourceMetrics {
-	// TODO
-	key := ""
+	key := GetKey(resource.Attributes())
 	res, resourcePresent := (*allMetrics)[key]
 	if resourcePresent {
 		return res
@@ -212,8 +214,7 @@ type ResourceMetrics struct {
 }
 
 func (rm *ResourceMetrics) GetOrCreateScope(scope pcommon.InstrumentationScope) *ScopeMetrics {
-	// TODO
-	key := ""
+	key := GetKey(scope.Attributes())
 	scopeMetrics, scopeMetricsPresent := rm.scopeMetrics[key]
 	if scopeMetricsPresent {
 		return scopeMetrics
@@ -259,4 +260,23 @@ func (m *Metric) AddDatapoint(span ptrace.Span, attributes map[string]string) {
 type Datapoint struct {
 	span       ptrace.Span
 	attributes map[string]string
+}
+
+func GetKey(m pcommon.Map) string {
+	allKeys := make([]string, m.Len())
+	m.Range(func(k string, v pcommon.Value) bool {
+		allKeys = append(allKeys, k)
+		return true
+	})
+	sort.Strings(allKeys)
+	return Hash(allKeys)
+}
+
+func Hash(objs []string) string {
+	digester := crypto.MD5.New()
+	for _, ob := range objs {
+		fmt.Fprint(digester, reflect.TypeOf(ob))
+		fmt.Fprint(digester, ob)
+	}
+	return string(digester.Sum(nil))
 }
