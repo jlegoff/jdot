@@ -31,15 +31,15 @@ func TestConvertOneSpanToMetrics(t *testing.T) {
 	scopeMetrics := metrics.ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics()
 	transactionDuration, transactionDurationPresent := getMetrics(scopeMetrics, "apm.service.transaction.duration")
 	assert.True(t, transactionDurationPresent)
-	assert.Equal(t, 1.0, transactionDuration.Histogram().DataPoints().At(0).Sum())
+	assert.Equal(t, 1.0, transactionDuration.ExponentialHistogram().DataPoints().At(0).Sum())
 
 	overviewWeb, overviewWebPresent := getMetrics(scopeMetrics, "apm.service.transaction.duration")
 	assert.True(t, overviewWebPresent)
-	assert.Equal(t, 1.0, overviewWeb.Histogram().DataPoints().At(0).Sum())
+	assert.Equal(t, 1.0, overviewWeb.ExponentialHistogram().DataPoints().At(0).Sum())
 
 	transactionOverview, transactionOverviewPresent := getMetrics(scopeMetrics, "apm.service.transaction.overview")
 	assert.True(t, transactionOverviewPresent)
-	assert.Equal(t, 1.0, transactionOverview.Histogram().DataPoints().At(0).Sum())
+	assert.Equal(t, 1.0, transactionOverview.ExponentialHistogram().DataPoints().At(0).Sum())
 }
 
 func getMetrics(metrics pmetric.MetricSlice, metricName string) (*pmetric.Metric, bool) {

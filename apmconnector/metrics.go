@@ -44,7 +44,7 @@ func (mb *MetricBuilderImpl) GetMetrics() pmetric.Metrics {
 			scopeMetrics := resourceMetrics.ScopeMetrics().AppendEmpty()
 			sm.origin.CopyTo(scopeMetrics.Scope())
 			for _, m := range sm.metrics {
-				addMetric(m, scopeMetrics)
+				addMetric(*m, scopeMetrics)
 			}
 		}
 	}
@@ -88,7 +88,7 @@ func (mb *MetricBuilderImpl) Record(resource pcommon.Resource, scope pcommon.Ins
 	sdkLanguage := GetSdkLanguage(resource.Attributes())
 	scopeMetric := resourceMetrics.GetOrCreateScope(scope)
 	if span.Kind() == ptrace.SpanKindServer {
-		ProcessServerSpan(span, &scopeMetric, sdkLanguage)
+		ProcessServerSpan(span, scopeMetric, sdkLanguage)
 	} else if span.Kind() == ptrace.SpanKindClient {
 		// filter out db calls that have no parent (so no transaction)
 		if !span.ParentSpanID().IsEmpty() {
@@ -106,7 +106,7 @@ func GetSdkLanguage(attributes pcommon.Map) string {
 	return "unknown"
 }
 
-func ProcessDatabaseSpan(span ptrace.Span, scopeMetric ScopeMetrics, sdkLanguage string) bool {
+func ProcessDatabaseSpan(span ptrace.Span, scopeMetric *ScopeMetrics, sdkLanguage string) bool {
 	dbSystem, dbSystemPresent := span.Attributes().Get("db.system")
 	if dbSystemPresent {
 		dbOperation, dbOperationPresent := span.Attributes().Get("db.operation")
@@ -127,7 +127,7 @@ func ProcessDatabaseSpan(span ptrace.Span, scopeMetric ScopeMetrics, sdkLanguage
 	return false
 }
 
-func ProcessExternalSpan(span ptrace.Span, scopeMetric ScopeMetrics, sdkLanguage string) bool {
+func ProcessExternalSpan(span ptrace.Span, scopeMetric *ScopeMetrics, sdkLanguage string) bool {
 	serverAddress, serverAddressPresent := span.Attributes().Get("server.address")
 	if serverAddressPresent {
 		metric := scopeMetric.GetOrCreateMetric("apm.service.transaction.external.duration", sdkLanguage)
@@ -142,14 +142,14 @@ func ProcessExternalSpan(span ptrace.Span, scopeMetric ScopeMetrics, sdkLanguage
 	return false
 }
 
-func ProcessClientSpan(span ptrace.Span, scopeMetric ScopeMetrics, sdkLanguage string) {
+func ProcessClientSpan(span ptrace.Span, scopeMetric *ScopeMetrics, sdkLanguage string) {
 	if !ProcessDatabaseSpan(span, scopeMetric, sdkLanguage) {
 		ProcessExternalSpan(span, scopeMetric, sdkLanguage)
 	}
 }
 
 func ProcessServerSpan(span ptrace.Span, scopeMetric *ScopeMetrics, sdkLanguage string) {
-	metric := scopeMetric.GetOrCreateMetric("apm.service.transaction.external.duration", sdkLanguage)
+	metric := scopeMetric.GetOrCreateMetric("apm.service.transaction.duration", sdkLanguage)
 	attributes := map[string]string{
 		"transactionType": "Web",
 		"transactionName": GetTransactionMetricName(span),
@@ -185,22 +185,22 @@ func GetTransactionMetricName(span ptrace.Span) string {
 	return "WebTransaction/Other/unknown"
 }
 
-type AllMetrics map[string]ResourceMetrics
+type AllMetrics map[string]*ResourceMetrics
 
 func NewMetrics() AllMetrics {
 	return make(AllMetrics)
 }
 
-func (allMetrics *AllMetrics) GetOrCreateResource(resource pcommon.Resource) ResourceMetrics {
+func (allMetrics *AllMetrics) GetOrCreateResource(resource pcommon.Resource) *ResourceMetrics {
 	// TODO
 	key := ""
 	res, resourcePresent := (*allMetrics)[key]
 	if resourcePresent {
 		return res
 	}
-	res = ResourceMetrics{
+	res = &ResourceMetrics{
 		origin:       resource,
-		scopeMetrics: make(map[string]ScopeMetrics),
+		scopeMetrics: make(map[string]*ScopeMetrics),
 	}
 	(*allMetrics)[key] = res
 	return res
@@ -208,19 +208,19 @@ func (allMetrics *AllMetrics) GetOrCreateResource(resource pcommon.Resource) Res
 
 type ResourceMetrics struct {
 	origin       pcommon.Resource
-	scopeMetrics map[string]ScopeMetrics
+	scopeMetrics map[string]*ScopeMetrics
 }
 
-func (rm *ResourceMetrics) GetOrCreateScope(scope pcommon.InstrumentationScope) ScopeMetrics {
+func (rm *ResourceMetrics) GetOrCreateScope(scope pcommon.InstrumentationScope) *ScopeMetrics {
 	// TODO
 	key := ""
 	scopeMetrics, scopeMetricsPresent := rm.scopeMetrics[key]
 	if scopeMetricsPresent {
 		return scopeMetrics
 	}
-	scopeMetrics = ScopeMetrics{
+	scopeMetrics = &ScopeMetrics{
 		origin:  scope,
-		metrics: make(map[string]Metric),
+		metrics: make(map[string]*Metric),
 	}
 	rm.scopeMetrics[key] = scopeMetrics
 	return scopeMetrics
@@ -228,16 +228,16 @@ func (rm *ResourceMetrics) GetOrCreateScope(scope pcommon.InstrumentationScope) 
 
 type ScopeMetrics struct {
 	origin  pcommon.InstrumentationScope
-	metrics map[string]Metric
+	metrics map[string]*Metric
 }
 
-func (sm *ScopeMetrics) GetOrCreateMetric(metricName string, sdkLanguage string) Metric {
+func (sm *ScopeMetrics) GetOrCreateMetric(metricName string, sdkLanguage string) *Metric {
 	key := metricName
 	metric, metricPresent := sm.metrics[metricName]
 	if metricPresent {
 		return metric
 	}
-	metric = Metric{
+	metric = &Metric{
 		metricName:  metricName,
 		sdkLanguage: sdkLanguage,
 		datapoints:  make([]Datapoint, 0),
