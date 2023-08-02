@@ -45,6 +45,7 @@ func (c *ApmConnector) ConsumeTraces(ctx context.Context, td ptrace.Traces) erro
 	metrics, logs := c.ConvertDataPoints(td)
 	if c.metricsConsumer != nil {
 		err := c.metricsConsumer.ConsumeMetrics(ctx, metrics)
+		c.metricBuilder.Reset()
 		if err != nil {
 			return err
 		}
