@@ -1,15 +1,11 @@
 package apmconnector
 
 import (
-	"crypto"
 	"fmt"
-	"github.com/lightstep/go-expohisto/structure"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.uber.org/zap"
-	"reflect"
-	"sort"
 )
 
 type MetricBuilder interface {
@@ -23,7 +19,7 @@ type MetricBuilder interface {
 
 type MetricBuilderImpl struct {
 	logger  *zap.Logger
-	metrics AllMetrics
+	metrics MetricMap
 }
 
 func NewMetricBuilder(logger *zap.Logger) MetricBuilder {
@@ -47,14 +43,14 @@ func (mb *MetricBuilderImpl) GetMetrics() pmetric.Metrics {
 			scopeMetrics := resourceMetrics.ScopeMetrics().AppendEmpty()
 			sm.origin.CopyTo(scopeMetrics.Scope())
 			for _, m := range sm.metrics {
-				addMetric(*m, scopeMetrics)
+				addMetricToScope(*m, scopeMetrics)
 			}
 		}
 	}
 	return metrics
 }
 
-func addMetric(metric Metric, scopeMetrics pmetric.ScopeMetrics) {
+func addMetricToScope(metric Metric, scopeMetrics pmetric.ScopeMetrics) {
 	otelMetric := scopeMetrics.Metrics().AppendEmpty()
 	otelMetric.SetName(metric.metricName)
 	otelMetric.SetUnit("s")
@@ -64,7 +60,7 @@ func addMetric(metric Metric, scopeMetrics pmetric.ScopeMetrics) {
 	otelDatapoints := histogram.DataPoints()
 	for _, dp := range metric.datapoints {
 		histoDp := otelDatapoints.AppendEmpty()
-		expoHistToExponentialDataPoint(dp.histogram, histoDp)
+		dp.histogram.AddDatapointToHistogram(histoDp)
 		histoDp.SetStartTimestamp(dp.startTimestamp)
 		histoDp.SetTimestamp(dp.timestamp)
 		for k, v := range dp.attributes {
@@ -72,37 +68,6 @@ func addMetric(metric Metric, scopeMetrics pmetric.ScopeMetrics) {
 		}
 	}
 
-}
-
-// expoHistToExponentialDataPoint copies `lightstep/go-expohisto` structure.Histogram to
-// pmetric.ExponentialHistogramDataPoint
-func expoHistToExponentialDataPoint(agg *structure.Histogram[float64], dp pmetric.ExponentialHistogramDataPoint) {
-	dp.SetCount(agg.Count())
-	dp.SetSum(agg.Sum())
-	if agg.Count() != 0 {
-		dp.SetMin(agg.Min())
-		dp.SetMax(agg.Max())
-	}
-
-	dp.SetZeroCount(agg.ZeroCount())
-	dp.SetScale(agg.Scale())
-
-	for _, half := range []struct {
-		inFunc  func() *structure.Buckets
-		outFunc func() pmetric.ExponentialHistogramDataPointBuckets
-	}{
-		{agg.Positive, dp.Positive},
-		{agg.Negative, dp.Negative},
-	} {
-		in := half.inFunc()
-		out := half.outFunc()
-		out.SetOffset(in.Offset())
-		out.BucketCounts().EnsureCapacity(int(in.Len()))
-
-		for i := uint32(0); i < in.Len(); i++ {
-			out.BucketCounts().Append(in.At(i))
-		}
-	}
 }
 
 func (mb *MetricBuilderImpl) Record(resource pcommon.Resource, scope pcommon.InstrumentationScope, span ptrace.Span) {
@@ -205,133 +170,4 @@ func GetTransactionMetricName(span ptrace.Span) string {
 		}
 	}
 	return "WebTransaction/Other/unknown"
-}
-
-type AllMetrics map[string]*ResourceMetrics
-
-func NewMetrics() AllMetrics {
-	return make(AllMetrics)
-}
-
-func (allMetrics *AllMetrics) GetOrCreateResource(resource pcommon.Resource) *ResourceMetrics {
-	key := GetKeyFromMap(resource.Attributes())
-	res, resourcePresent := (*allMetrics)[key]
-	if resourcePresent {
-		return res
-	}
-	res = &ResourceMetrics{
-		origin:       resource,
-		scopeMetrics: make(map[string]*ScopeMetrics),
-	}
-	(*allMetrics)[key] = res
-	return res
-}
-
-type ResourceMetrics struct {
-	origin       pcommon.Resource
-	scopeMetrics map[string]*ScopeMetrics
-}
-
-func (rm *ResourceMetrics) GetOrCreateScope(scope pcommon.InstrumentationScope) *ScopeMetrics {
-	key := GetKeyFromMap(scope.Attributes())
-	scopeMetrics, scopeMetricsPresent := rm.scopeMetrics[key]
-	if scopeMetricsPresent {
-		return scopeMetrics
-	}
-	scopeMetrics = &ScopeMetrics{
-		origin:  scope,
-		metrics: make(map[string]*Metric),
-	}
-	rm.scopeMetrics[key] = scopeMetrics
-	return scopeMetrics
-}
-
-type ScopeMetrics struct {
-	origin  pcommon.InstrumentationScope
-	metrics map[string]*Metric
-}
-
-func (sm *ScopeMetrics) GetOrCreateMetric(metricName string, span ptrace.Span, attributes map[string]string) *Metric {
-	metric, metricPresent := sm.metrics[metricName]
-	if metricPresent {
-		return metric
-	}
-	metric = &Metric{
-		metricName: metricName,
-		datapoints: make(map[string]Datapoint),
-	}
-	sm.metrics[metricName] = metric
-	return metric
-}
-
-type Metric struct {
-	datapoints map[string]Datapoint
-	metricName string
-}
-
-func (m *Metric) AddDatapoint(span ptrace.Span, dimensions map[string]string) {
-	attributes := make(map[string]string)
-	for k, v := range dimensions {
-		attributes[k] = v
-	}
-	span.Attributes().Range(func(k string, v pcommon.Value) bool {
-		attributes[k] = v.AsString()
-		return true
-	})
-
-	dp, dpPresent := m.datapoints[GetKey(attributes)]
-	if !dpPresent {
-		histogram := new(structure.Histogram[float64])
-		histogram.Init(structure.NewConfig())
-		dp = Datapoint{histogram: histogram, attributes: attributes, startTimestamp: span.StartTimestamp(), timestamp: span.EndTimestamp()}
-		m.datapoints[GetKey(attributes)] = dp
-	}
-	duration := float64((span.EndTimestamp() - span.StartTimestamp()).AsTime().UnixNano()) / 1e9
-	dp.histogram.Update(duration)
-	if dp.startTimestamp.AsTime().After(span.StartTimestamp().AsTime()) {
-		dp.startTimestamp = span.StartTimestamp()
-	}
-	if dp.timestamp.AsTime().Before(span.EndTimestamp().AsTime()) {
-		// FIXME set the timestamp to now?
-		dp.timestamp = span.EndTimestamp()
-	}
-}
-
-type Datapoint struct {
-	histogram      *structure.Histogram[float64]
-	attributes     map[string]string
-	startTimestamp pcommon.Timestamp
-	timestamp      pcommon.Timestamp
-}
-
-func GetKeyFromMap(pMap pcommon.Map) string {
-	m := make(map[string]string, pMap.Len())
-	pMap.Range(func(k string, v pcommon.Value) bool {
-		m[k] = v.AsString()
-		return true
-	})
-	return GetKey(m)
-}
-
-func GetKey(m map[string]string) string {
-	allKeys := make([]string, len(m))
-	for k, _ := range m {
-		allKeys = append(allKeys, k)
-	}
-	sort.Strings(allKeys)
-	toHash := make([]string, 2*len(m))
-	for _, k := range allKeys {
-		toHash = append(toHash, k)
-		toHash = append(toHash, m[k])
-	}
-	return Hash(toHash)
-}
-
-func Hash(objs []string) string {
-	digester := crypto.MD5.New()
-	for _, ob := range objs {
-		fmt.Fprint(digester, reflect.TypeOf(ob))
-		fmt.Fprint(digester, ob)
-	}
-	return string(digester.Sum(nil))
 }
