@@ -289,6 +289,7 @@ func (m *Metric) AddDatapoint(span ptrace.Span, dimensions map[string]string) {
 		dp.startTimestamp = span.StartTimestamp()
 	}
 	if dp.timestamp.AsTime().Before(span.EndTimestamp().AsTime()) {
+		// FIXME set the timestamp to now?
 		dp.timestamp = span.EndTimestamp()
 	}
 }

@@ -77,9 +77,16 @@ func (c *ApmConnector) ConvertDataPoints(td ptrace.Traces) (pmetric.Metrics, plo
 			scopeSpan := rs.ScopeSpans().At(j)
 			for k := 0; k < scopeSpan.Spans().Len(); k++ {
 				span := scopeSpan.Spans().At(k)
-				c.metricBuilder.Record(rs.Resource(), scopeSpan.Scope(), span)
+				if c.metricBuilder != nil {
+					c.metricBuilder.Record(rs.Resource(), scopeSpan.Scope(), span)
+				}
 			}
 		}
 	}
-	return c.metricBuilder.GetMetrics(), BuildTransactions(td)
+	metrics := pmetric.NewMetrics()
+	if c.metricBuilder != nil {
+		metrics = c.metricBuilder.GetMetrics()
+	}
+	logs := BuildTransactions(td)
+	return metrics, logs
 }
