@@ -67,6 +67,9 @@ func addMetric(metric Metric, scopeMetrics pmetric.ScopeMetrics) {
 		expoHistToExponentialDataPoint(dp.histogram, histoDp)
 		histoDp.SetStartTimestamp(dp.startTimestamp)
 		histoDp.SetTimestamp(dp.timestamp)
+		for k, v := range dp.attributes {
+			histoDp.Attributes().PutStr(k, v)
+		}
 	}
 
 }
