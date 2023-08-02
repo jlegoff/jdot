@@ -42,6 +42,34 @@ func TestConvertOneSpanToMetrics(t *testing.T) {
 	assert.Equal(t, 1.0, transactionOverview.ExponentialHistogram().DataPoints().At(0).Sum())
 }
 
+func TestConvertMultipleSpansToMetrics(t *testing.T) {
+	connector := NewMetricApmConnector(nil, &Config{}, &zap.Logger{})
+
+	traces := ptrace.NewTraces()
+	resourceSpans := traces.ResourceSpans().AppendEmpty()
+	resourceSpans.Resource().Attributes().PutStr("service.name", "service")
+	scopeSpans := resourceSpans.ScopeSpans().AppendEmpty().Spans()
+	attrs := map[string]string{
+		"attrKey": "attrValue",
+	}
+	end := time.Now()
+	start := end.Add(-time.Second)
+	spanValues := []TestSpan{
+		{Start: start, End: end, Name: "span", Kind: ptrace.SpanKindServer},
+		{Start: start, End: end, Name: "span", Kind: ptrace.SpanKindServer},
+	}
+	addSpan(scopeSpans, attrs, spanValues)
+
+	metrics, _ := connector.ConvertDataPoints(traces)
+	assert.Equal(t, 3, metrics.MetricCount())
+
+	scopeMetrics := metrics.ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics()
+	transactionDuration, transactionDurationPresent := getMetrics(scopeMetrics, "apm.service.transaction.duration")
+	assert.True(t, transactionDurationPresent)
+	assert.Equal(t, 1, transactionDuration.ExponentialHistogram().DataPoints().Len())
+	assert.Equal(t, uint64(2), transactionDuration.ExponentialHistogram().DataPoints().At(0).Count())
+}
+
 func getMetrics(metrics pmetric.MetricSlice, metricName string) (*pmetric.Metric, bool) {
 	for i := 0; i < metrics.Len(); i++ {
 		m := metrics.At(i)

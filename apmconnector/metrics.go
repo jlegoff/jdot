@@ -320,9 +320,9 @@ func GetKey(m map[string]string) string {
 	}
 	sort.Strings(allKeys)
 	toHash := make([]string, 2*len(m))
-	for k, v := range m {
+	for _, k := range allKeys {
 		toHash = append(toHash, k)
-		toHash = append(toHash, v)
+		toHash = append(toHash, m[k])
 	}
 	return Hash(toHash)
 }
