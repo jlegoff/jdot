@@ -57,7 +57,28 @@ func GetSdkLanguage(attributes pcommon.Map) string {
 	return "unknown"
 }
 
+type Transaction struct {
+	SdkLanguage         string
+	SpanToChildDuration map[string]int64
+	ScopeMetric         pmetric.ScopeMetrics
+	Measurements        []Measurement
+}
+
+type SegmentNameProvider interface {
+	SegmentName(transactionType string)
+}
+
+type Measurement struct {
+	metricName          string
+	durationNanos       int64
+	attributes          pcommon.Map
+	segmentNameProvider SegmentNameProvider
+	metricTimesliceName string
+}
+
 func ConvertTraces(logger *zap.Logger, td ptrace.Traces) pmetric.Metrics {
+	fmt.Printf("BATCH\n")
+	transactions := make(map[string]Transaction)
 	metrics := pmetric.NewMetrics()
 	for i := 0; i < td.ResourceSpans().Len(); i++ {
 		resourceMetrics := metrics.ResourceMetrics().AppendEmpty()
@@ -74,19 +95,55 @@ func ConvertTraces(logger *zap.Logger, td ptrace.Traces) pmetric.Metrics {
 			scopeMetric := resourceMetrics.ScopeMetrics().AppendEmpty()
 			for k := 0; k < scopeSpan.Spans().Len(); k++ {
 				span := scopeSpan.Spans().At(k)
-				if span.Kind() == ptrace.SpanKindServer {
-					ProcessServerSpan(span, scopeMetric, sdkLanguage)
-				} else if span.Kind() == ptrace.SpanKindClient {
-					// filter out db calls that have no parent (so no transaction)
-					if !span.ParentSpanID().IsEmpty() {
-						ProcessClientSpan(span, scopeMetric, sdkLanguage)
-					}
-				}
+				transaction := GetOrCreateTransaction(transactions, sdkLanguage, span, scopeMetric)
+				AddSpan(transaction, span)
+
+				fmt.Printf("Span kind: %s Name: %s Trace Id: %s Span id: %s\n", span.Kind(), span.Name(), span.TraceID().String(), span.SpanID().String())
+				/*
+					if span.Kind() == ptrace.SpanKindServer {
+						ProcessServerSpan(span, scopeMetric, sdkLanguage)
+					} else if span.Kind() == ptrace.SpanKindClient {
+						// filter out db calls that have no parent (so no transaction)
+						if !span.ParentSpanID().IsEmpty() {
+							ProcessClientSpan(span, scopeMetric, sdkLanguage)
+						}
+					}*/
 			}
 		}
 
 	}
 	return metrics
+}
+
+func GetOrCreateTransaction(transactions map[string]Transaction, sdkLanguage string, span ptrace.Span, scopeMetric pmetric.ScopeMetrics) Transaction {
+	transaction, txExists := transactions[span.TraceID().String()]
+	if !txExists {
+		transaction = Transaction{SdkLanguage: sdkLanguage, SpanToChildDuration: make(map[string]int64), ScopeMetric: scopeMetric, Measurements: []Measurement{}}
+		transactions[span.TraceID().String()] = transaction
+		fmt.Printf("Created transaction for: %s\n", span.TraceID().String())
+	}
+	return transaction
+}
+
+func AddSpan(transaction Transaction, span ptrace.Span) {
+	if span.Kind() == ptrace.SpanKindServer {
+		ProcessServerSpan(transaction, span)
+	} else {
+		duration := span.EndTimestamp() - span.StartTimestamp()
+		childDuration, exists := transaction.SpanToChildDuration[span.ParentSpanID().String()]
+		if !exists {
+			childDuration = 0
+		}
+		childDuration += duration.AsTime().UnixNano()
+		transaction.SpanToChildDuration[span.ParentSpanID().String()] = childDuration
+
+		if span.Kind() == ptrace.SpanKindClient {
+			// filter out db calls that have no parent (so no transaction)
+			if !span.ParentSpanID().IsEmpty() {
+				//ProcessClientSpan(span, scopeMetric, sdkLanguage)
+			}
+		}
+	}
 }
 
 func ProcessDatabaseSpan(span ptrace.Span, scopeMetric pmetric.ScopeMetrics, sdkLanguage string) bool {
@@ -130,25 +187,25 @@ func ProcessClientSpan(span ptrace.Span, scopeMetric pmetric.ScopeMetrics, sdkLa
 	}
 }
 
-func ProcessServerSpan(span ptrace.Span, scopeMetric pmetric.ScopeMetrics, sdkLanguage string) {
+func ProcessServerSpan(transaction Transaction, span ptrace.Span) {
 
-	metric := AddMetric(scopeMetric.Metrics(), "apm.service.transaction.duration")
+	metric := AddMetric(transaction.ScopeMetric.Metrics(), "apm.service.transaction.duration")
 	dp := SetHistogramFromSpan(span, metric)
 	span.Attributes().CopyTo(dp.Attributes())
 	dp.Attributes().PutStr("transactionType", "Web")
 	transactionName := GetTransactionMetricName(span)
 	dp.Attributes().PutStr("transactionName", transactionName)
 
-	overviewWeb := AddMetric(scopeMetric.Metrics(), "apm.service.overview.web")
+	overviewWeb := AddMetric(transaction.ScopeMetric.Metrics(), "apm.service.overview.web")
 	overviewDp := SetHistogramFromSpan(span, overviewWeb)
 	span.Attributes().CopyTo(overviewDp.Attributes())
 
-	overviewDp.Attributes().PutStr("segmentName", sdkLanguage)
+	overviewDp.Attributes().PutStr("segmentName", transaction.SdkLanguage)
 
-	txBreakdownMetric := AddMetric(scopeMetric.Metrics(), "apm.service.transaction.overview")
+	txBreakdownMetric := AddMetric(transaction.ScopeMetric.Metrics(), "apm.service.transaction.overview")
 	txBreakdownDp := SetHistogramFromSpan(span, txBreakdownMetric)
 	span.Attributes().CopyTo(txBreakdownDp.Attributes())
-	txBreakdownDp.Attributes().PutStr("metricTimesliceName", sdkLanguage)
+	txBreakdownDp.Attributes().PutStr("metricTimesliceName", transaction.SdkLanguage)
 	txBreakdownDp.Attributes().PutStr("transactionName", transactionName)
 }
 
