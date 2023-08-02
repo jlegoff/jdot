@@ -125,35 +125,38 @@ func GetOrCreateTransaction(transactions map[string]Transaction, sdkLanguage str
 	return transaction
 }
 
+func DurationInNanos(span ptrace.Span) int64 {
+	return (span.EndTimestamp() - span.StartTimestamp()).AsTime().UnixNano()
+}
+
 func AddSpan(transaction Transaction, span ptrace.Span) {
 	if span.Kind() == ptrace.SpanKindServer {
 		ProcessServerSpan(transaction, span)
 	} else {
-		duration := span.EndTimestamp() - span.StartTimestamp()
 		childDuration, exists := transaction.SpanToChildDuration[span.ParentSpanID().String()]
 		if !exists {
 			childDuration = 0
 		}
-		childDuration += duration.AsTime().UnixNano()
+		childDuration += DurationInNanos(span)
 		transaction.SpanToChildDuration[span.ParentSpanID().String()] = childDuration
 
 		if span.Kind() == ptrace.SpanKindClient {
 			// filter out db calls that have no parent (so no transaction)
 			if !span.ParentSpanID().IsEmpty() {
-				//ProcessClientSpan(span, scopeMetric, sdkLanguage)
+				ProcessClientSpan(transaction, span)
 			}
 		}
 	}
 }
 
-func ProcessDatabaseSpan(span ptrace.Span, scopeMetric pmetric.ScopeMetrics, sdkLanguage string) bool {
+func ProcessDatabaseSpan(transaction Transaction, span ptrace.Span) bool {
 	dbSystem, dbSystemPresent := span.Attributes().Get("db.system")
 	if dbSystemPresent {
 		dbOperation, dbOperationPresent := span.Attributes().Get("db.operation")
 		if dbOperationPresent {
 			dbTable, dbTablePresent := span.Attributes().Get("db.sql.table")
 			if dbTablePresent {
-				metric := AddMetric(scopeMetric.Metrics(), "apm.service.datastore.operation.duration")
+				metric := AddMetric(transaction.ScopeMetric.Metrics(), "apm.service.datastore.operation.duration")
 				dp := SetHistogramFromSpan(span, metric)
 				span.Attributes().CopyTo(dp.Attributes())
 				dp.Attributes().PutStr("db.operation", dbOperation.AsString())
@@ -166,10 +169,10 @@ func ProcessDatabaseSpan(span ptrace.Span, scopeMetric pmetric.ScopeMetrics, sdk
 	return false
 }
 
-func ProcessExternalSpan(span ptrace.Span, scopeMetric pmetric.ScopeMetrics, sdkLanguage string) bool {
+func ProcessExternalSpan(transaction Transaction, span ptrace.Span) bool {
 	serverAddress, serverAddressPresent := span.Attributes().Get("server.address")
 	if serverAddressPresent {
-		metric := AddMetric(scopeMetric.Metrics(), "apm.service.transaction.external.duration")
+		metric := AddMetric(transaction.ScopeMetric.Metrics(), "apm.service.transaction.external.duration")
 		dp := SetHistogramFromSpan(span, metric)
 		span.Attributes().CopyTo(dp.Attributes())
 		dp.Attributes().PutStr("external.host", serverAddress.AsString())
@@ -181,10 +184,11 @@ func ProcessExternalSpan(span ptrace.Span, scopeMetric pmetric.ScopeMetrics, sdk
 	return false
 }
 
-func ProcessClientSpan(span ptrace.Span, scopeMetric pmetric.ScopeMetrics, sdkLanguage string) {
-	if !ProcessDatabaseSpan(span, scopeMetric, sdkLanguage) {
-		ProcessExternalSpan(span, scopeMetric, sdkLanguage)
+func ProcessClientSpan(transaction Transaction, span ptrace.Span) bool {
+	if !ProcessDatabaseSpan(transaction, span) {
+		return ProcessExternalSpan(transaction, span)
 	}
+	return false
 }
 
 func ProcessServerSpan(transaction Transaction, span ptrace.Span) {
