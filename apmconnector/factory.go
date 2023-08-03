@@ -38,11 +38,7 @@ func createTracesToMetrics(
 ) (connector.Traces, error) {
 	c := cfg.(*Config)
 
-	return &ApmConnector{
-		config:          c,
-		metricsConsumer: nextConsumer,
-		logger:          set.Logger,
-	}, nil
+	return NewMetricApmConnector(nextConsumer, c, set.Logger), nil
 }
 
 // createTracesToMetrics creates a traces to logs connector based on provided config.
@@ -54,9 +50,5 @@ func createTracesToLogs(
 ) (connector.Traces, error) {
 	c := cfg.(*Config)
 
-	return &ApmConnector{
-		config:       c,
-		logsConsumer: nextConsumer,
-		logger:       set.Logger,
-	}, nil
+	return NewLoggerApmConnector(nextConsumer, c, set.Logger), nil
 }

@@ -3,6 +3,7 @@ module apmconnector
 go 1.20
 
 require (
+	github.com/lightstep/go-expohisto v1.0.0
 	github.com/stretchr/testify v1.8.4
 	go.opentelemetry.io/collector/component v0.81.0
 	go.opentelemetry.io/collector/connector v0.81.0
