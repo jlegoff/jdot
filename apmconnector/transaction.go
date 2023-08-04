@@ -28,16 +28,6 @@ func (t TransactionType) GetOverviewMetricName() string {
 	}
 }
 
-type TransactionName struct {
-	Name            string
-	TransactionType TransactionType
-}
-
-func (transactionName TransactionName) AddToAttributes(attributes pcommon.Map) {
-	attributes.PutStr("transactionType", transactionName.TransactionType.AsString())
-	attributes.PutStr("transactionName", transactionName.Name)
-}
-
 type Transaction struct {
 	SdkLanguage         string
 	SpanToChildDuration map[string]int64
@@ -69,6 +59,10 @@ func GetOrCreateTransaction(transactions map[string]Transaction, sdkLanguage str
 	}
 
 	return &transaction
+}
+
+func (transaction *Transaction) IsRootSet() bool {
+	return (ptrace.Span{}) != transaction.RootSpan
 }
 
 func (transaction *Transaction) SetRootSpan(span ptrace.Span) {
@@ -153,8 +147,7 @@ func (transaction *Transaction) ProcessClientSpan(span ptrace.Span) bool {
 }
 
 func (transaction *Transaction) ProcessServerSpan() {
-	if (ptrace.Span{}) == transaction.RootSpan {
-		// root span is not set
+	if !transaction.IsRootSet() {
 		return
 	}
 	span := transaction.RootSpan
@@ -162,11 +155,10 @@ func (transaction *Transaction) ProcessServerSpan() {
 	dp := SetHistogramFromSpan(metric, span)
 	span.Attributes().CopyTo(dp.Attributes())
 
-	fullTransactionName := GetTransactionMetricName(span)
-	transactionName := fullTransactionName.Name
-	transactionType := fullTransactionName.TransactionType
+	transactionName, transactionType := GetTransactionMetricName(span)
 
-	fullTransactionName.AddToAttributes(dp.Attributes())
+	dp.Attributes().PutStr("transactionType", transactionType.AsString())
+	dp.Attributes().PutStr("transactionName", transactionName)
 
 	breakdownBySegment := make(map[string]int64)
 	totalBreakdownNanos := int64(0)
@@ -251,7 +243,7 @@ func SetHistogram(metric pmetric.Metric, startTimestamp pcommon.Timestamp, endTi
 	return dp
 }
 
-func GetTransactionMetricName(span ptrace.Span) TransactionName {
+func GetTransactionMetricName(span ptrace.Span) (string, TransactionType) {
 	httpRoute, routePresent := span.Attributes().Get("http.route")
 
 	if routePresent {
@@ -261,14 +253,14 @@ func GetTransactionMetricName(span ptrace.Span) TransactionName {
 	if urlPathPresent {
 		return GetWebTransactionMetricName(span, urlPath.Str(), "Uri")
 	}
-	return TransactionName{Name: "WebTransaction/Other/unknown", TransactionType: WebTransactionType}
+	return "WebTransaction/Other/unknown", WebTransactionType
 }
 
-func GetWebTransactionMetricName(span ptrace.Span, name string, nameType string) TransactionName {
+func GetWebTransactionMetricName(span ptrace.Span, name string, nameType string) (string, TransactionType) {
 	method, methodPresent := span.Attributes().Get("http.method")
 	if methodPresent {
-		return TransactionName{Name: fmt.Sprintf("WebTransaction/%s%s (%s)", nameType, name, method.Str()), TransactionType: WebTransactionType}
+		return fmt.Sprintf("WebTransaction/%s%s (%s)", nameType, name, method.Str()), WebTransactionType
 	} else {
-		return TransactionName{Name: fmt.Sprintf("WebTransaction/%s%s", nameType, name), TransactionType: WebTransactionType}
+		return fmt.Sprintf("WebTransaction/%s%s", nameType, name), WebTransactionType
 	}
 }
