@@ -19,9 +19,23 @@ func (t TransactionType) AsString() string {
 	return fmt.Sprintf("%s", t)
 }
 
+func (t TransactionType) GetOverviewMetricName() string {
+	switch t {
+	case WebTransactionType:
+		return "apm.service.overview.web"
+	default:
+		return "apm.service.overview.other"
+	}
+}
+
 type TransactionName struct {
 	Name            string
 	TransactionType TransactionType
+}
+
+func (transactionName TransactionName) AddToAttributes(attributes pcommon.Map) {
+	attributes.PutStr("transactionType", transactionName.TransactionType.AsString())
+	attributes.PutStr("transactionName", transactionName.Name)
 }
 
 type Transaction struct {
@@ -135,10 +149,7 @@ func (transaction *Transaction) ProcessGenericSpan(span ptrace.Span) bool {
 }
 
 func (transaction *Transaction) ProcessClientSpan(span ptrace.Span) bool {
-	if !transaction.ProcessDatabaseSpan(span) {
-		return transaction.ProcessExternalSpan(span)
-	}
-	return false
+	return transaction.ProcessDatabaseSpan(span) || transaction.ProcessExternalSpan(span)
 }
 
 func (transaction *Transaction) ProcessServerSpan() {
@@ -154,9 +165,8 @@ func (transaction *Transaction) ProcessServerSpan() {
 	fullTransactionName := GetTransactionMetricName(span)
 	transactionName := fullTransactionName.Name
 	transactionType := fullTransactionName.TransactionType
-	dp.Attributes().PutStr("transactionType", transactionType.AsString())
 
-	dp.Attributes().PutStr("transactionName", transactionName)
+	fullTransactionName.AddToAttributes(dp.Attributes())
 
 	breakdownBySegment := make(map[string]int64)
 	totalBreakdownNanos := int64(0)
@@ -172,8 +182,7 @@ func (transaction *Transaction) ProcessServerSpan() {
 		breakdownBySegment[transaction.SdkLanguage] += remainingNanos
 	}
 
-	// FIXME
-	overviewMetricName := "apm.service.overview.web"
+	overviewMetricName := transactionType.GetOverviewMetricName()
 
 	for segment, sum := range breakdownBySegment {
 		overviewMetric := AddMetric(transaction.MetricSlice, overviewMetricName)
@@ -196,8 +205,9 @@ func (transaction *Transaction) ProcessMeasurement(measurement *Measurement, tra
 
 	overviewMetric := AddMetric(transaction.MetricSlice, "apm.service.transaction.overview")
 	overviewMetricDp := SetHistogram(overviewMetric, measurement.Span.StartTimestamp(), measurement.Span.EndTimestamp(), exclusiveDuration)
-	measurement.Attributes.PutStr("transactionName", transactionName)
 	measurement.Attributes.PutStr("scope", transactionName)
+	// we might not need transactionName here..
+	measurement.Attributes.PutStr("transactionName", transactionName)
 	measurement.Attributes.PutStr("transactionType", transactionType.AsString())
 
 	measurement.Attributes.CopyTo(overviewMetricDp.Attributes())
@@ -243,15 +253,22 @@ func SetHistogram(metric pmetric.Metric, startTimestamp pcommon.Timestamp, endTi
 
 func GetTransactionMetricName(span ptrace.Span) TransactionName {
 	httpRoute, routePresent := span.Attributes().Get("http.route")
+
 	if routePresent {
-		// http.request.method
-		method, methodPresent := span.Attributes().Get("http.method")
-		// http.route starts with a /
-		if methodPresent {
-			return TransactionName{Name: fmt.Sprintf("WebTransaction/http.route%s (%s)", httpRoute.Str(), method.Str()), TransactionType: WebTransactionType}
-		} else {
-			return TransactionName{Name: fmt.Sprintf("WebTransaction/http.route%s", httpRoute.Str()), TransactionType: WebTransactionType}
-		}
+		return GetWebTransactionMetricName(span, httpRoute.Str(), "http.route")
+	}
+	urlPath, urlPathPresent := span.Attributes().Get("url.path")
+	if urlPathPresent {
+		return GetWebTransactionMetricName(span, urlPath.Str(), "Uri")
 	}
 	return TransactionName{Name: "WebTransaction/Other/unknown", TransactionType: WebTransactionType}
+}
+
+func GetWebTransactionMetricName(span ptrace.Span, name string, nameType string) TransactionName {
+	method, methodPresent := span.Attributes().Get("http.method")
+	if methodPresent {
+		return TransactionName{Name: fmt.Sprintf("WebTransaction/%s%s (%s)", nameType, name, method.Str()), TransactionType: WebTransactionType}
+	} else {
+		return TransactionName{Name: fmt.Sprintf("WebTransaction/%s%s", nameType, name), TransactionType: WebTransactionType}
+	}
 }
