@@ -31,8 +31,9 @@ func buildTransaction(lr plog.LogRecord, span ptrace.Span) {
 	lr.Attributes().PutStr("event.domain", "newrelic.otel_collector")
 	lr.Attributes().PutStr("event.name", "Transaction")
 
-	lr.Attributes().PutStr("transactionType", "Web")
-	lr.Attributes().PutStr("name", GetTransactionMetricName(span))
+	fullTransactionName := GetTransactionMetricName(span)
+	lr.Attributes().PutStr("transactionType", fullTransactionName.transactionType.AsString())
+	lr.Attributes().PutStr("name", fullTransactionName.name)
 
 	lr.Attributes().PutStr("trace.id", span.TraceID().String())
 	duration := float64((span.EndTimestamp() - span.StartTimestamp()).AsTime().UnixNano()) / 1e9

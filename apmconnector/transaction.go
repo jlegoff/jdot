@@ -8,6 +8,22 @@ import (
 	"go.opentelemetry.io/collector/pdata/ptrace"
 )
 
+type TransactionType string
+
+const (
+	WebTransactionType   TransactionType = "Web"
+	OtherTransactionType TransactionType = "Other"
+)
+
+func (t TransactionType) AsString() string {
+	return fmt.Sprintf("%s", t)
+}
+
+type TransactionName struct {
+	name            string
+	transactionType TransactionType
+}
+
 type Transaction struct {
 	sdkLanguage         string
 	spanToChildDuration map[string]int64
@@ -22,7 +38,7 @@ type Measurement struct {
 	durationNanos          int64
 	exclusiveDurationNanos int64
 	attributes             pcommon.Map
-	segmentNameProvider    func(string) string
+	segmentNameProvider    func(TransactionType) string
 	metricTimesliceName    string
 	// FIXME
 	span ptrace.Span
@@ -82,7 +98,7 @@ func (transaction *Transaction) ProcessDatabaseSpan(span ptrace.Span) bool {
 				attributes.PutStr("db.system", dbSystem.AsString())
 				attributes.PutStr("db.sql.table", dbTable.AsString())
 
-				segmentNameProvider := func(t string) string { return dbSystem.AsString() }
+				segmentNameProvider := func(t TransactionType) string { return dbSystem.AsString() }
 				timesliceName := fmt.Sprintf("Datastore/statement/%s/%s/%s", dbSystem.AsString(), dbTable.AsString(), dbOperation.AsString())
 				measurement := Measurement{spanId: span.SpanID().String(), metricName: "apm.service.datastore.operation.duration", span: span,
 					durationNanos: DurationInNanos(span), attributes: attributes, segmentNameProvider: segmentNameProvider, metricTimesliceName: timesliceName}
@@ -113,7 +129,7 @@ func (transaction *Transaction) ProcessExternalSpan(span ptrace.Span) bool {
 }
 
 func (transaction *Transaction) ProcessGenericSpan(span ptrace.Span) bool {
-	segmentNameProvider := func(t string) string { return transaction.sdkLanguage }
+	segmentNameProvider := func(t TransactionType) string { return transaction.sdkLanguage }
 	attributes := pcommon.NewMap()
 	timesliceName := fmt.Sprintf("Custom/%s", span.Name())
 	measurement := Measurement{spanId: span.SpanID().String(), metricName: "newrelic.timeslice.value", span: span,
@@ -137,11 +153,11 @@ func (transaction *Transaction) ProcessServerSpan(span ptrace.Span) {
 	dp := SetHistogramFromSpan(metric, span)
 	span.Attributes().CopyTo(dp.Attributes())
 
-	// FIXME
-	transactionType := "Web"
+	fullTransactionName := GetTransactionMetricName(span)
+	transactionName := fullTransactionName.name
+	transactionType := fullTransactionName.transactionType
+	dp.Attributes().PutStr("transactionType", transactionType.AsString())
 
-	dp.Attributes().PutStr("transactionType", transactionType)
-	transactionName := GetTransactionMetricName(span)
 	dp.Attributes().PutStr("transactionName", transactionName)
 
 	breakdownBySegment := make(map[string]int64)
@@ -180,7 +196,7 @@ func (transaction *Transaction) ProcessServerSpan(span ptrace.Span) {
 	}
 }
 
-func (transaction *Transaction) ProcessMeasurement(measurement *Measurement, transactionType string, transactionName string) {
+func (transaction *Transaction) ProcessMeasurement(measurement *Measurement, transactionType TransactionType, transactionName string) {
 	exclusiveDuration := transaction.ExclusiveTime(*measurement)
 	measurement.exclusiveDurationNanos = exclusiveDuration
 	measurement.attributes.PutStr("metricTimesliceName", measurement.metricTimesliceName)
@@ -194,7 +210,7 @@ func (transaction *Transaction) ProcessMeasurement(measurement *Measurement, tra
 	overviewMetricDp := SetHistogram(overviewMetric, measurement.span.StartTimestamp(), measurement.span.EndTimestamp(), exclusiveDuration)
 	measurement.attributes.PutStr("transactionName", transactionName)
 	measurement.attributes.PutStr("scope", transactionName)
-	measurement.attributes.PutStr("transactionType", transactionType)
+	measurement.attributes.PutStr("transactionType", transactionType.AsString())
 
 	measurement.attributes.CopyTo(overviewMetricDp.Attributes())
 }
@@ -241,17 +257,17 @@ func SetHistogram(metric pmetric.Metric, startTimestamp pcommon.Timestamp, endTi
 	return dp
 }
 
-func GetTransactionMetricName(span ptrace.Span) string {
+func GetTransactionMetricName(span ptrace.Span) TransactionName {
 	httpRoute, routePresent := span.Attributes().Get("http.route")
 	if routePresent {
 		// http.request.method
 		method, methodPresent := span.Attributes().Get("http.method")
 		// http.route starts with a /
 		if methodPresent {
-			return fmt.Sprintf("WebTransaction/http.route%s (%s)", httpRoute.Str(), method.Str())
+			return TransactionName{name: fmt.Sprintf("WebTransaction/http.route%s (%s)", httpRoute.Str(), method.Str()), transactionType: WebTransactionType}
 		} else {
-			return fmt.Sprintf("WebTransaction/http.route%s", httpRoute.Str())
+			return TransactionName{name: fmt.Sprintf("WebTransaction/http.route%s", httpRoute.Str()), transactionType: WebTransactionType}
 		}
 	}
-	return "WebTransaction/Other/unknown"
+	return TransactionName{name: "WebTransaction/Other/unknown", transactionType: WebTransactionType}
 }
