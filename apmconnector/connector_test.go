@@ -24,7 +24,7 @@ func TestConvertOneSpanToMetrics(t *testing.T) {
 
 	var logger zap.Logger
 	metrics := ConvertTraces(&logger, traces)
-	assert.Equal(t, 1, metrics.MetricCount())
+	assert.Equal(t, 2, metrics.MetricCount())
 	dp := metrics.ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics().At(0).Histogram().DataPoints().At(0)
 	assert.Equal(t, 1.0, dp.Sum())
 }

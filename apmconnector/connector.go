@@ -59,7 +59,7 @@ func GetSdkLanguage(attributes pcommon.Map) string {
 
 func ConvertTraces(logger *zap.Logger, td ptrace.Traces) pmetric.Metrics {
 	fmt.Printf("BATCH\n")
-	transactions := make(map[string]Transaction)
+	transactions := NewTransactionsMap()
 	metrics := pmetric.NewMetrics()
 	for i := 0; i < td.ResourceSpans().Len(); i++ {
 		resourceMetrics := metrics.ResourceMetrics().AppendEmpty()
@@ -76,22 +76,20 @@ func ConvertTraces(logger *zap.Logger, td ptrace.Traces) pmetric.Metrics {
 			scopeMetric := resourceMetrics.ScopeMetrics().AppendEmpty()
 			for k := 0; k < scopeSpan.Spans().Len(); k++ {
 				span := scopeSpan.Spans().At(k)
-				transaction := GetOrCreateTransaction(transactions, sdkLanguage, span, scopeMetric.Metrics())
+				transaction, id := transactions.GetOrCreateTransaction(sdkLanguage, span, scopeMetric.Metrics())
 
 				//fmt.Printf("Span kind: %s Name: %s Trace Id: %s Span id: %s Parent: %s\n", span.Kind(), span.Name(), span.TraceID().String(), span.SpanID().String(), span.ParentSpanID().String())
 
 				transaction.AddSpan(span)
 
 				// :(
-				transactions[span.TraceID().String()] = *transaction
+				transactions.Transactions[id] = *transaction
 			}
 		}
 
 	}
 
-	for _, transaction := range transactions {
-		transaction.ProcessServerSpan()
-	}
+	transactions.ProcessTransactions()
 
 	return metrics
 }

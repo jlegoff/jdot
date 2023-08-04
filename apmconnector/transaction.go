@@ -48,17 +48,31 @@ type Measurement struct {
 	Span ptrace.Span
 }
 
-func GetOrCreateTransaction(transactions map[string]Transaction, sdkLanguage string, span ptrace.Span, metricSlice pmetric.MetricSlice) *Transaction {
+type TransactionsMap struct {
+	Transactions map[string]Transaction
+}
+
+func NewTransactionsMap() *TransactionsMap {
+	return &TransactionsMap{Transactions: make(map[string]Transaction)}
+}
+
+func (transactions *TransactionsMap) ProcessTransactions() {
+	for _, transaction := range transactions.Transactions {
+		transaction.ProcessServerSpan()
+	}
+}
+
+func (transactions *TransactionsMap) GetOrCreateTransaction(sdkLanguage string, span ptrace.Span, metricSlice pmetric.MetricSlice) (*Transaction, string) {
 	traceID := span.TraceID().String()
-	transaction, txExists := transactions[traceID]
+	transaction, txExists := transactions.Transactions[traceID]
 	if !txExists {
 		transaction = Transaction{SdkLanguage: sdkLanguage, SpanToChildDuration: make(map[string]int64),
 			MetricSlice: metricSlice, Measurements: make(map[string]Measurement)}
-		transactions[traceID] = transaction
+		transactions.Transactions[traceID] = transaction
 		//fmt.Printf("Created transaction for: %s   %s\n", traceID, transaction.sdkLanguage)
 	}
 
-	return &transaction
+	return &transaction, traceID
 }
 
 func (transaction *Transaction) IsRootSet() bool {
