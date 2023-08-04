@@ -14,6 +14,7 @@ func TestGetTransactionMetricNamUnknown(t *testing.T) {
 	name, txType := GetTransactionMetricName(span)
 	assert.Equal(t, "WebTransaction/Other/unknown", name)
 	assert.Equal(t, WebTransactionType, txType)
+	assert.Equal(t, "Web", txType.AsString())
 }
 
 func TestGetTransactionMetricNamRoute(t *testing.T) {
