@@ -90,9 +90,7 @@ func ConvertTraces(logger *zap.Logger, td ptrace.Traces) pmetric.Metrics {
 	}
 
 	for _, transaction := range transactions {
-		if (ptrace.Span{}) != transaction.rootSpan {
-			transaction.ProcessServerSpan(transaction.rootSpan)
-		}
+		transaction.ProcessServerSpan()
 	}
 
 	return metrics
