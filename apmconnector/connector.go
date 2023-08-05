@@ -76,14 +76,11 @@ func ConvertTraces(logger *zap.Logger, td ptrace.Traces) pmetric.Metrics {
 			scopeMetric := resourceMetrics.ScopeMetrics().AppendEmpty()
 			for k := 0; k < scopeSpan.Spans().Len(); k++ {
 				span := scopeSpan.Spans().At(k)
-				transaction, id := transactions.GetOrCreateTransaction(sdkLanguage, span, scopeMetric.Metrics())
+				transaction, _ := transactions.GetOrCreateTransaction(sdkLanguage, span, scopeMetric.Metrics())
 
 				//fmt.Printf("Span kind: %s Name: %s Trace Id: %s Span id: %s Parent: %s\n", span.Kind(), span.Name(), span.TraceID().String(), span.SpanID().String(), span.ParentSpanID().String())
 
 				transaction.AddSpan(span)
-
-				// :(
-				transactions.Transactions[id] = *transaction
 			}
 		}
 

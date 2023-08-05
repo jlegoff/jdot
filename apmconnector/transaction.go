@@ -49,11 +49,11 @@ type Measurement struct {
 }
 
 type TransactionsMap struct {
-	Transactions map[string]Transaction
+	Transactions map[string]*Transaction
 }
 
 func NewTransactionsMap() *TransactionsMap {
-	return &TransactionsMap{Transactions: make(map[string]Transaction)}
+	return &TransactionsMap{Transactions: make(map[string]*Transaction)}
 }
 
 func (transactions *TransactionsMap) ProcessTransactions() {
@@ -66,13 +66,13 @@ func (transactions *TransactionsMap) GetOrCreateTransaction(sdkLanguage string, 
 	traceID := span.TraceID().String()
 	transaction, txExists := transactions.Transactions[traceID]
 	if !txExists {
-		transaction = Transaction{SdkLanguage: sdkLanguage, SpanToChildDuration: make(map[string]int64),
+		transaction = &Transaction{SdkLanguage: sdkLanguage, SpanToChildDuration: make(map[string]int64),
 			MetricSlice: metricSlice, Measurements: make(map[string]Measurement)}
 		transactions.Transactions[traceID] = transaction
 		//fmt.Printf("Created transaction for: %s   %s\n", traceID, transaction.sdkLanguage)
 	}
 
-	return &transaction, traceID
+	return transaction, traceID
 }
 
 func (transaction *Transaction) IsRootSet() bool {
@@ -101,23 +101,23 @@ func (transaction *Transaction) AddSpan(span ptrace.Span) {
 	}
 }
 
+func NewSimpleNameProvider(name string) func(TransactionType) string {
+	return func(t TransactionType) string { return name }
+}
+
 func (transaction *Transaction) ProcessDatabaseSpan(span ptrace.Span) bool {
-	dbSystem, dbSystemPresent := span.Attributes().Get("db.system")
-	if dbSystemPresent {
-		dbOperation, dbOperationPresent := span.Attributes().Get("db.operation")
-		if dbOperationPresent {
-			dbTable, dbTablePresent := span.Attributes().Get("db.sql.table")
-			if dbTablePresent {
+	if dbSystem, dbSystemPresent := span.Attributes().Get("db.system"); dbSystemPresent {
+		if dbOperation, dbOperationPresent := span.Attributes().Get("db.operation"); dbOperationPresent {
+			if dbTable, dbTablePresent := span.Attributes().Get("db.sql.table"); dbTablePresent {
 				attributes := pcommon.NewMap()
 				//span.Attributes().CopyTo(attributes)
 				attributes.PutStr("db.operation", dbOperation.AsString())
 				attributes.PutStr("db.system", dbSystem.AsString())
 				attributes.PutStr("db.sql.table", dbTable.AsString())
 
-				segmentNameProvider := func(t TransactionType) string { return dbSystem.AsString() }
 				timesliceName := fmt.Sprintf("Datastore/statement/%s/%s/%s", dbSystem.AsString(), dbTable.AsString(), dbOperation.AsString())
 				measurement := Measurement{SpanId: span.SpanID().String(), MetricName: "apm.service.datastore.operation.duration", Span: span,
-					DurationNanos: DurationInNanos(span), Attributes: attributes, SegmentNameProvider: segmentNameProvider, MetricTimesliceName: timesliceName}
+					DurationNanos: DurationInNanos(span), Attributes: attributes, SegmentNameProvider: NewSimpleNameProvider(dbSystem.AsString()), MetricTimesliceName: timesliceName}
 
 				transaction.Measurements[measurement.SpanId] = measurement
 
@@ -129,13 +129,30 @@ func (transaction *Transaction) ProcessDatabaseSpan(span ptrace.Span) bool {
 }
 
 func (transaction *Transaction) ProcessExternalSpan(span ptrace.Span) bool {
-	serverAddress, serverAddressPresent := span.Attributes().Get("server.address")
-	if serverAddressPresent {
-		metric := AddMetric(transaction.MetricSlice, "apm.service.transaction.external.duration")
-		dp := SetHistogramFromSpan(metric, span)
-		span.Attributes().CopyTo(dp.Attributes())
-		dp.Attributes().PutStr("external.host", serverAddress.AsString())
+	if serverAddress, serverAddressPresent := span.Attributes().Get("server.address"); serverAddressPresent {
+		attributes := pcommon.NewMap()
+		//span.Attributes().CopyTo(attributes)
+		attributes.PutStr("external.host", serverAddress.AsString())
 
+		segmentNameProvider := func(t TransactionType) string {
+			switch t {
+			case WebTransactionType:
+				return "Web external"
+			default:
+				return "Background external"
+			}
+		}
+		timesliceName := fmt.Sprintf("External/%s/all", serverAddress.AsString())
+		measurement := Measurement{SpanId: span.SpanID().String(), MetricName: "apm.service.external.host.duration", Span: span,
+			DurationNanos: DurationInNanos(span), Attributes: attributes, SegmentNameProvider: segmentNameProvider, MetricTimesliceName: timesliceName}
+
+		transaction.Measurements[measurement.SpanId] = measurement
+		/*
+			metric := AddMetric(transaction.MetricSlice, "apm.service.transaction.external.duration")
+			dp := SetHistogramFromSpan(metric, span)
+			span.Attributes().CopyTo(dp.Attributes())
+			dp.Attributes().PutStr("external.host", serverAddress.AsString())
+		*/
 		// FIXME
 		//dp.Attributes().PutStr("transactionType", "Web")
 
@@ -145,11 +162,10 @@ func (transaction *Transaction) ProcessExternalSpan(span ptrace.Span) bool {
 }
 
 func (transaction *Transaction) ProcessGenericSpan(span ptrace.Span) bool {
-	segmentNameProvider := func(t TransactionType) string { return transaction.SdkLanguage }
 	attributes := pcommon.NewMap()
 	timesliceName := fmt.Sprintf("Custom/%s", span.Name())
 	measurement := Measurement{SpanId: span.SpanID().String(), MetricName: "newrelic.timeslice.value", Span: span,
-		DurationNanos: DurationInNanos(span), Attributes: attributes, SegmentNameProvider: segmentNameProvider, MetricTimesliceName: timesliceName}
+		DurationNanos: DurationInNanos(span), Attributes: attributes, SegmentNameProvider: NewSimpleNameProvider(transaction.SdkLanguage), MetricTimesliceName: timesliceName}
 
 	transaction.Measurements[measurement.SpanId] = measurement
 
@@ -258,21 +274,17 @@ func SetHistogram(metric pmetric.Metric, startTimestamp pcommon.Timestamp, endTi
 }
 
 func GetTransactionMetricName(span ptrace.Span) (string, TransactionType) {
-	httpRoute, routePresent := span.Attributes().Get("http.route")
-
-	if routePresent {
+	if httpRoute, routePresent := span.Attributes().Get("http.route"); routePresent {
 		return GetWebTransactionMetricName(span, httpRoute.Str(), "http.route")
 	}
-	urlPath, urlPathPresent := span.Attributes().Get("url.path")
-	if urlPathPresent {
+	if urlPath, urlPathPresent := span.Attributes().Get("url.path"); urlPathPresent {
 		return GetWebTransactionMetricName(span, urlPath.Str(), "Uri")
 	}
 	return "WebTransaction/Other/unknown", WebTransactionType
 }
 
 func GetWebTransactionMetricName(span ptrace.Span, name string, nameType string) (string, TransactionType) {
-	method, methodPresent := span.Attributes().Get("http.method")
-	if methodPresent {
+	if method, methodPresent := span.Attributes().Get("http.method"); methodPresent {
 		return fmt.Sprintf("WebTransaction/%s%s (%s)", nameType, name, method.Str()), WebTransactionType
 	} else {
 		return fmt.Sprintf("WebTransaction/%s%s", nameType, name), WebTransactionType
