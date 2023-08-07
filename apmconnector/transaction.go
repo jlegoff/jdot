@@ -183,6 +183,11 @@ func (transaction *Transaction) ProcessServerSpan() {
 
 	transactionName, transactionType := GetTransactionMetricName(span)
 
+	err := span.Status().Code() == ptrace.StatusCodeError
+	if err {
+		transaction.IncrementErrorCount(transactionType, span.EndTimestamp())
+	}
+
 	dp.Attributes().PutStr("transactionType", transactionType.AsString())
 	dp.Attributes().PutStr("transactionName", transactionName)
 
@@ -210,8 +215,13 @@ func (transaction *Transaction) ProcessServerSpan() {
 	}
 }
 
+func (transaction *Transaction) IncrementErrorCount(transactionType TransactionType, timestamp pcommon.Timestamp) {
+	dp := CreateSumMetric(transaction.MetricSlice, "apm.service.error.count", timestamp)
+	dp.Attributes().PutStr("transactionType", transactionType.AsString())
+}
+
 func (transaction *Transaction) ProcessMeasurement(measurement *Measurement, transactionType TransactionType, transactionName string) {
-	exclusiveDuration := transaction.ExclusiveTime(*measurement)
+	exclusiveDuration := measurement.ExclusiveTime(transaction)
 	measurement.ExclusiveDurationNanos = exclusiveDuration
 	measurement.Attributes.PutStr("metricTimesliceName", measurement.MetricTimesliceName)
 	//	fmt.Printf("Name: %s total: %d exclusive: %d    id:%s\n", measurement.metricName, measurement.durationNanos, exclusiveDuration, measurement.spanId)
@@ -235,7 +245,7 @@ func DurationInNanos(span ptrace.Span) int64 {
 	return (span.EndTimestamp() - span.StartTimestamp()).AsTime().UnixNano()
 }
 
-func (transaction *Transaction) ExclusiveTime(measurement Measurement) int64 {
+func (measurement Measurement) ExclusiveTime(transaction *Transaction) int64 {
 	return measurement.DurationNanos - transaction.SpanToChildDuration[measurement.SpanId]
 }
 
@@ -296,9 +306,16 @@ func GetSdkLanguage(attributes pcommon.Map) string {
 }
 
 // Generate the metrc used for the host instances drop down
-func GenerateInstanceMetric(resourceMetrics pmetric.ScopeMetrics, hostName string, timestamp pcommon.Timestamp) {
-	metric := resourceMetrics.Metrics().AppendEmpty()
-	metric.SetName("apm.service.instance.count")
+func GenerateInstanceMetric(scopeMetrics pmetric.ScopeMetrics, hostName string, timestamp pcommon.Timestamp) {
+	dp := CreateSumMetric(scopeMetrics.Metrics(), "apm.service.instance.count", timestamp)
+
+	dp.Attributes().PutStr("instanceName", hostName)
+	dp.Attributes().PutStr("host.displayName", hostName)
+}
+
+func CreateSumMetric(metrics pmetric.MetricSlice, metricName string, timestamp pcommon.Timestamp) pmetric.NumberDataPoint {
+	metric := metrics.AppendEmpty()
+	metric.SetName(metricName)
 	sum := metric.SetEmptySum()
 	sum.SetAggregationTemporality(pmetric.AggregationTemporalityCumulative)
 	sum.SetIsMonotonic(false)
@@ -307,7 +324,5 @@ func GenerateInstanceMetric(resourceMetrics pmetric.ScopeMetrics, hostName strin
 	dp.SetTimestamp(timestamp)
 
 	dp.SetIntValue(1)
-
-	dp.Attributes().PutStr("instanceName", hostName)
-	dp.Attributes().PutStr("host.displayName", hostName)
+	return dp
 }
