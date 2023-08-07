@@ -33,7 +33,7 @@ func NewMetricBuilder(logger *zap.Logger) MetricBuilder {
 
 func (mb *MetricBuilderImpl) Reset() {
 	mb.metrics = NewMetrics()
-	// TODO reset transaction map
+	mb.transactionMap = NewTransactionsMap()
 }
 
 func (mb *MetricBuilderImpl) GetMetrics() pmetric.Metrics {
