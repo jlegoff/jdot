@@ -216,16 +216,17 @@ func (transaction *Transaction) ProcessMeasurement(measurement *Measurement, tra
 	measurement.Attributes.PutStr("metricTimesliceName", measurement.MetricTimesliceName)
 	//	fmt.Printf("Name: %s total: %d exclusive: %d    id:%s\n", measurement.metricName, measurement.durationNanos, exclusiveDuration, measurement.spanId)
 
+	measurement.Attributes.PutStr("transactionType", transactionType.AsString())
+	measurement.Attributes.PutStr("scope", transactionName)
+
 	metric := AddMetric(transaction.MetricSlice, measurement.MetricName)
 	metricDp := SetHistogramFromSpan(metric, measurement.Span)
 	measurement.Attributes.CopyTo(metricDp.Attributes())
 
 	overviewMetric := AddMetric(transaction.MetricSlice, "apm.service.transaction.overview")
 	overviewMetricDp := SetHistogram(overviewMetric, measurement.Span.StartTimestamp(), measurement.Span.EndTimestamp(), exclusiveDuration)
-	measurement.Attributes.PutStr("scope", transactionName)
 	// we might not need transactionName here..
 	measurement.Attributes.PutStr("transactionName", transactionName)
-	measurement.Attributes.PutStr("transactionType", transactionType.AsString())
 
 	measurement.Attributes.CopyTo(overviewMetricDp.Attributes())
 }
