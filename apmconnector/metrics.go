@@ -80,6 +80,7 @@ func (mb *MetricBuilderImpl) Record(resource pcommon.Resource, scope pcommon.Ins
 
 	transaction, traceId := mb.transactionMap.GetOrCreateTransaction(sdkLanguage, span, scopeMetric)
 	mb.transactionMap.Transactions[traceId] = transaction
+	transaction.AddSpan(span)
 }
 
 func GetSdkLanguage(attributes pcommon.Map) string {
