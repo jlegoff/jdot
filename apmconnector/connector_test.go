@@ -26,18 +26,14 @@ func TestConvertOneSpanToMetrics(t *testing.T) {
 	addSpan(scopeSpans, attrs, spanValues)
 
 	metrics, _ := connector.ConvertDataPoints(traces)
-	assert.Equal(t, 3, metrics.MetricCount())
+	assert.Equal(t, 2, metrics.MetricCount())
 
 	scopeMetrics := metrics.ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics()
 	transactionDuration, transactionDurationPresent := getMetrics(scopeMetrics, "apm.service.transaction.duration")
 	assert.True(t, transactionDurationPresent)
 	assert.Equal(t, 1.0, transactionDuration.ExponentialHistogram().DataPoints().At(0).Sum())
 
-	overviewWeb, overviewWebPresent := getMetrics(scopeMetrics, "apm.service.transaction.duration")
-	assert.True(t, overviewWebPresent)
-	assert.Equal(t, 1.0, overviewWeb.ExponentialHistogram().DataPoints().At(0).Sum())
-
-	transactionOverview, transactionOverviewPresent := getMetrics(scopeMetrics, "apm.service.transaction.overview")
+	transactionOverview, transactionOverviewPresent := getMetrics(scopeMetrics, "apm.service.overview.web")
 	assert.True(t, transactionOverviewPresent)
 	assert.Equal(t, 1.0, transactionOverview.ExponentialHistogram().DataPoints().At(0).Sum())
 }

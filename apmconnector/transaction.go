@@ -209,7 +209,7 @@ func (transaction *Transaction) ProcessServerSpan() {
 		attributes["segmentName"] = segment
 		overviewMetric := transaction.AddMetric(overviewMetricName)
 		// TODO convert back to int
-		overviewMetric.AddDatapointWithValue(span, attributes, float64(sum))
+		overviewMetric.AddDatapointWithValue(span, attributes, NanosToSeconds(sum))
 	}
 }
 
@@ -259,4 +259,8 @@ func GetWebTransactionMetricName(span ptrace.Span, name string, nameType string)
 	} else {
 		return fmt.Sprintf("WebTransaction/%s%s", nameType, name), WebTransactionType
 	}
+}
+
+func NanosToSeconds(nanos int64) float64 {
+	return float64(nanos) / 1e9
 }
