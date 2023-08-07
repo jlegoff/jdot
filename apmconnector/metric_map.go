@@ -87,10 +87,6 @@ func (m *Metric) AddDatapointWithValue(span ptrace.Span, dimensions map[string]s
 	for k, v := range dimensions {
 		attributes[k] = v
 	}
-	span.Attributes().Range(func(k string, v pcommon.Value) bool {
-		attributes[k] = v.AsString()
-		return true
-	})
 
 	dp, dpPresent := m.datapoints[GetKey(attributes)]
 	if !dpPresent {
