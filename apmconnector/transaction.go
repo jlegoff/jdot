@@ -299,8 +299,7 @@ func FilterAttributes(from pcommon.Map) pcommon.Map {
 	f := from.AsRaw()
 	m := make(map[string]any)
 	for _, k := range attributes {
-		v, exists := f[k]
-		if exists {
+		if v, exists := f[k]; exists {
 			m[k] = v
 		}
 	}
