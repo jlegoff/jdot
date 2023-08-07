@@ -258,7 +258,7 @@ func SetHistogramFromSpan(metric pmetric.Metric, span ptrace.Span) pmetric.Histo
 	return SetHistogram(metric, span.StartTimestamp(), span.EndTimestamp(), (span.EndTimestamp() - span.StartTimestamp()).AsTime().UnixNano())
 }
 
-func SetHistogram(metric pmetric.Metric, startTimestamp pcommon.Timestamp, endTimestamp pcommon.Timestamp, durationNanos int64) pmetric.HistogramDataPoint {
+func SetHistogram(metric pmetric.Metric, startTimestamp, endTimestamp pcommon.Timestamp, durationNanos int64) pmetric.HistogramDataPoint {
 	histogram := metric.SetEmptyHistogram()
 	histogram.SetAggregationTemporality(pmetric.AggregationTemporalityDelta)
 	dp := histogram.DataPoints().AppendEmpty()
@@ -313,4 +313,29 @@ func FilterAttributes(from pcommon.Map) pcommon.Map {
 		}
 	}
 	return newMap
+}
+
+func GetSdkLanguage(attributes pcommon.Map) string {
+	sdkLanguage, sdkLanguagePresent := attributes.Get("telemetry.sdk.language")
+	if sdkLanguagePresent {
+		return sdkLanguage.AsString()
+	}
+	return "unknown"
+}
+
+// Generate the metrc used for the host instances drop down
+func GenerateInstanceMetric(resourceMetrics pmetric.ScopeMetrics, hostName string, timestamp pcommon.Timestamp) {
+	metric := resourceMetrics.Metrics().AppendEmpty()
+	metric.SetName("apm.service.instance.count")
+	sum := metric.SetEmptySum()
+	sum.SetAggregationTemporality(pmetric.AggregationTemporalityCumulative)
+	sum.SetIsMonotonic(false)
+	dp := sum.DataPoints().AppendEmpty()
+
+	dp.SetTimestamp(timestamp)
+
+	dp.SetIntValue(1)
+
+	dp.Attributes().PutStr("instanceName", hostName)
+	dp.Attributes().PutStr("host.displayName", hostName)
 }

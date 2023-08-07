@@ -5,7 +5,6 @@ import (
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
-	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.uber.org/zap"
@@ -48,14 +47,6 @@ func (c *ApmConnector) Shutdown(context.Context) error {
 	return nil
 }
 
-func GetSdkLanguage(attributes pcommon.Map) string {
-	sdkLanguage, sdkLanguagePresent := attributes.Get("telemetry.sdk.language")
-	if sdkLanguagePresent {
-		return sdkLanguage.AsString()
-	}
-	return "unknown"
-}
-
 func ConvertTraces(logger *zap.Logger, td ptrace.Traces) pmetric.Metrics {
 	transactions := NewTransactionsMap()
 	metrics := pmetric.NewMetrics()
@@ -76,6 +67,12 @@ func ConvertTraces(logger *zap.Logger, td ptrace.Traces) pmetric.Metrics {
 			scopeMetric := resourceMetrics.ScopeMetrics().AppendEmpty()
 			for k := 0; k < scopeSpan.Spans().Len(); k++ {
 				span := scopeSpan.Spans().At(k)
+				if k == 0 {
+					if hostName, exists := resourceMetrics.Resource().Attributes().Get("host.name"); exists {
+						GenerateInstanceMetric(scopeMetric, hostName.AsString(), span.EndTimestamp())
+					}
+				}
+
 				transaction, _ := transactions.GetOrCreateTransaction(sdkLanguage, span, scopeMetric.Metrics())
 
 				//fmt.Printf("Span kind: %s Name: %s Trace Id: %s Span id: %s Parent: %s\n", span.Kind(), span.Name(), span.TraceID().String(), span.SpanID().String(), span.ParentSpanID().String())
