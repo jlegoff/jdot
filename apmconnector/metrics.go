@@ -105,7 +105,7 @@ func ProcessDatabaseSpan(span ptrace.Span, scopeMetric *ScopeMetrics, sdkLanguag
 					"db.system":    dbSystem.AsString(),
 					"db.sql.table": dbTable.AsString(),
 				}
-				metric := scopeMetric.GetOrCreateMetric("apm.service.datastore.operation.duration", span, attributes)
+				metric := scopeMetric.GetOrCreateMetric("apm.service.datastore.operation.duration")
 				metric.AddDatapoint(span, attributes)
 				return true
 			}
@@ -122,7 +122,7 @@ func ProcessExternalSpan(span ptrace.Span, scopeMetric *ScopeMetrics, sdkLanguag
 			// FIXME
 			"transactionType": "Web",
 		}
-		metric := scopeMetric.GetOrCreateMetric("apm.service.transaction.external.duration", span, attributes)
+		metric := scopeMetric.GetOrCreateMetric("apm.service.transaction.external.duration")
 		metric.AddDatapoint(span, attributes)
 		return true
 	}
@@ -140,20 +140,20 @@ func ProcessServerSpan(span ptrace.Span, scopeMetric *ScopeMetrics, sdkLanguage 
 		"transactionType": "Web",
 		"transactionName": GetTransactionMetricName(span),
 	}
-	metric := scopeMetric.GetOrCreateMetric("apm.service.transaction.duration", span, attributes)
+	metric := scopeMetric.GetOrCreateMetric("apm.service.transaction.duration")
 	metric.AddDatapoint(span, attributes)
 
 	overviewAttributes := map[string]string{
 		"segmentName": sdkLanguage,
 	}
-	overviewWeb := scopeMetric.GetOrCreateMetric("apm.service.overview.web", span, overviewAttributes)
+	overviewWeb := scopeMetric.GetOrCreateMetric("apm.service.overview.web")
 	overviewWeb.AddDatapoint(span, overviewAttributes)
 
 	txBreakdownAttributes := map[string]string{
 		"metricTimesliceName": sdkLanguage,
 		"transactionName":     GetTransactionMetricName(span),
 	}
-	txBreakdownMetric := scopeMetric.GetOrCreateMetric("apm.service.transaction.overview", span, txBreakdownAttributes)
+	txBreakdownMetric := scopeMetric.GetOrCreateMetric("apm.service.transaction.overview")
 	txBreakdownMetric.AddDatapoint(span, txBreakdownAttributes)
 }
 

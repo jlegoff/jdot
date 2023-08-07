@@ -1,10 +1,15 @@
 package apmconnector
 
 import (
+	"context"
 	"crypto"
 	"fmt"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	sdkresource "go.opentelemetry.io/otel/sdk/resource"
 	"reflect"
 	"sort"
 )
@@ -27,17 +32,26 @@ func (allMetrics *MetricMap) GetOrCreateResource(resource pcommon.Resource) *Res
 	if resourcePresent {
 		return res
 	}
+	attrs := make([]attribute.KeyValue, resource.Attributes().Len())
+	resource.Attributes().Range(func(k string, v pcommon.Value) bool {
+		// TODO handle more types (not only string)
+		attrs = append(attrs, attribute.KeyValue{Key: attribute.Key(k), Value: attribute.StringValue(v.Str())})
+		return true
+	})
+	newResource := sdkresource.NewWithAttributes("", attrs...)
 	res = &ResourceMetrics{
-		origin:       resource,
-		scopeMetrics: make(map[string]*ScopeMetrics),
+		origin:        resource,
+		scopeMetrics:  make(map[string]*ScopeMetrics),
+		meterProvider: sdkmetric.NewMeterProvider(sdkmetric.WithResource(newResource), sdkmetric.WithReader()),
 	}
 	(*allMetrics)[key] = res
 	return res
 }
 
 type ResourceMetrics struct {
-	origin       pcommon.Resource
-	scopeMetrics map[string]*ScopeMetrics
+	origin        pcommon.Resource
+	scopeMetrics  map[string]*ScopeMetrics
+	meterProvider *sdkmetric.MeterProvider
 }
 
 func (rm *ResourceMetrics) GetOrCreateScope(scope pcommon.InstrumentationScope) *ScopeMetrics {
@@ -46,9 +60,11 @@ func (rm *ResourceMetrics) GetOrCreateScope(scope pcommon.InstrumentationScope) 
 	if scopeMetricsPresent {
 		return scopeMetrics
 	}
+	meter := rm.meterProvider.Meter(scope.Name())
 	scopeMetrics = &ScopeMetrics{
 		origin:  scope,
 		metrics: make(map[string]*Metric),
+		meter:   &meter,
 	}
 	rm.scopeMetrics[key] = scopeMetrics
 	return scopeMetrics
@@ -57,24 +73,28 @@ func (rm *ResourceMetrics) GetOrCreateScope(scope pcommon.InstrumentationScope) 
 type ScopeMetrics struct {
 	origin  pcommon.InstrumentationScope
 	metrics map[string]*Metric
+	meter   *metric.Meter
 }
 
-func (sm *ScopeMetrics) GetOrCreateMetric(metricName string, span ptrace.Span, attributes map[string]string) *Metric {
-	metric, metricPresent := sm.metrics[metricName]
+func (sm *ScopeMetrics) GetOrCreateMetric(metricName string) *Metric {
+	m, metricPresent := sm.metrics[metricName]
 	if metricPresent {
-		return metric
+		return m
 	}
-	metric = &Metric{
+	h, _ := (*sm.meter).Float64Histogram(metricName, metric.WithUnit("s"))
+	m = &Metric{
 		metricName: metricName,
 		datapoints: make(map[string]Datapoint),
+		histogram:  h,
 	}
-	sm.metrics[metricName] = metric
-	return metric
+	sm.metrics[metricName] = m
+	return m
 }
 
 type Metric struct {
 	datapoints map[string]Datapoint
 	metricName string
+	histogram  metric.Float64Histogram
 }
 
 func (m *Metric) AddDatapoint(span ptrace.Span, dimensions map[string]string) {
@@ -86,6 +106,12 @@ func (m *Metric) AddDatapoint(span ptrace.Span, dimensions map[string]string) {
 		attributes[k] = v.AsString()
 		return true
 	})
+	kvattrs := make([]attribute.KeyValue, len(attributes))
+	for k, v := range attributes {
+		kvattrs = append(kvattrs, attribute.KeyValue{Key: attribute.Key(k), Value: attribute.StringValue(v)})
+	}
+	duration := float64((span.EndTimestamp() - span.StartTimestamp()).AsTime().UnixNano()) / 1e9
+	m.histogram.Record(context.Background(), duration, metric.WithAttributes(kvattrs...))
 
 	dp, dpPresent := m.datapoints[GetKey(attributes)]
 	if !dpPresent {
@@ -93,7 +119,6 @@ func (m *Metric) AddDatapoint(span ptrace.Span, dimensions map[string]string) {
 		dp = Datapoint{histogram: histogram, attributes: attributes, startTimestamp: span.StartTimestamp(), timestamp: span.EndTimestamp()}
 		m.datapoints[GetKey(attributes)] = dp
 	}
-	duration := float64((span.EndTimestamp() - span.StartTimestamp()).AsTime().UnixNano()) / 1e9
 	dp.histogram.Update(duration)
 	if dp.startTimestamp.AsTime().After(span.StartTimestamp().AsTime()) {
 		dp.startTimestamp = span.StartTimestamp()
