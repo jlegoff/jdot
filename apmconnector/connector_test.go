@@ -1,6 +1,7 @@
 package apmconnector
 
 import (
+	"encoding/binary"
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
@@ -50,14 +51,15 @@ func TestConvertMultipleSpansToMetrics(t *testing.T) {
 	}
 	end := time.Now()
 	start := end.Add(-time.Second)
+
 	spanValues := []TestSpan{
-		{Start: start, End: end, Name: "span", Kind: ptrace.SpanKindServer},
-		{Start: start, End: end, Name: "span", Kind: ptrace.SpanKindServer},
+		{Start: start, End: end, Name: "span", Kind: ptrace.SpanKindServer, TraceId: 1},
+		{Start: start, End: end, Name: "span", Kind: ptrace.SpanKindServer, TraceId: 2},
 	}
 	addSpan(scopeSpans, attrs, spanValues)
 
 	metrics, _ := connector.ConvertDataPoints(traces)
-	assert.Equal(t, 3, metrics.MetricCount())
+	assert.Equal(t, 2, metrics.MetricCount())
 
 	scopeMetrics := metrics.ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics()
 	transactionDuration, transactionDurationPresent := getMetrics(scopeMetrics, "apm.service.transaction.duration")
@@ -96,6 +98,7 @@ func TestConvertOneSpanToLogs(t *testing.T) {
 func addSpan(spanSlice ptrace.SpanSlice, attributes map[string]string, spanValues []TestSpan) {
 	for _, spanValue := range spanValues {
 		span := spanSlice.AppendEmpty()
+		span.SetTraceID(makeTraceId(spanValue.TraceId))
 		span.SetName(spanValue.Name)
 		span.SetEndTimestamp(pcommon.NewTimestampFromTime(time.Unix(spanValue.End.Unix(), 0)))
 		span.SetStartTimestamp(pcommon.NewTimestampFromTime(time.Unix(spanValue.Start.Unix(), 0)))
@@ -107,8 +110,15 @@ func addSpan(spanSlice ptrace.SpanSlice, attributes map[string]string, spanValue
 }
 
 type TestSpan struct {
-	Start time.Time
-	End   time.Time
-	Name  string
-	Kind  ptrace.SpanKind
+	TraceId uint16
+	Start   time.Time
+	End     time.Time
+	Name    string
+	Kind    ptrace.SpanKind
+}
+
+func makeTraceId(traceId uint16) pcommon.TraceID {
+	b := make([]byte, 16)
+	binary.LittleEndian.PutUint16(b, traceId)
+	return pcommon.TraceID(b)
 }
