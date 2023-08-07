@@ -37,13 +37,10 @@ type Transaction struct {
 }
 
 type Measurement struct {
-	SpanId                 string
-	MetricName             string
-	DurationNanos          int64
-	ExclusiveDurationNanos int64
-	Attributes             pcommon.Map
-	SegmentNameProvider    func(TransactionType) string
-	MetricTimesliceName    string
+	SpanId, MetricName, MetricTimesliceName string
+	DurationNanos, ExclusiveDurationNanos   int64
+	Attributes                              pcommon.Map
+	SegmentNameProvider                     func(TransactionType) string
 	// FIXME
 	Span ptrace.Span
 }
@@ -281,42 +278,12 @@ func GetTransactionMetricName(span ptrace.Span) (string, TransactionType) {
 	return "WebTransaction/Other/unknown", WebTransactionType
 }
 
-func GetWebTransactionMetricName(span ptrace.Span, name string, nameType string) (string, TransactionType) {
+func GetWebTransactionMetricName(span ptrace.Span, name, nameType string) (string, TransactionType) {
 	if method, methodPresent := span.Attributes().Get("http.method"); methodPresent {
 		return fmt.Sprintf("WebTransaction/%s%s (%s)", nameType, name, method.Str()), WebTransactionType
 	} else {
 		return fmt.Sprintf("WebTransaction/%s%s", nameType, name), WebTransactionType
 	}
-}
-
-type AttributeFilter struct {
-	attributesToKeep []string
-}
-
-func NewAttributeFilter() *AttributeFilter {
-	return &AttributeFilter{attributesToKeep: []string{"os.description", "telemetry.auto.version", "telemetry.sdk.language", "host.name",
-		"os.type", "telemetry.sdk.name", "process.runtime.description", "process.runtime.version", "telemetry.sdk.version",
-		"host.arch", "service.name", "service.instance.id"}}
-}
-
-func (attributeFilter *AttributeFilter) FilterAttributes(from pcommon.Map) pcommon.Map {
-	f := from.AsRaw()
-	m := make(map[string]any)
-	for _, k := range attributeFilter.attributesToKeep {
-		if v, exists := f[k]; exists {
-			m[k] = v
-		}
-	}
-	newMap := pcommon.NewMap()
-	newMap.FromRaw(m)
-	if hostName, exists := from.Get("host.name"); exists {
-		newMap.PutStr("host", hostName.AsString())
-
-		if _, e := newMap.Get("service.instance.id"); !e {
-			newMap.PutStr("service.instance.id", hostName.AsString())
-		}
-	}
-	return newMap
 }
 
 func GetSdkLanguage(attributes pcommon.Map) string {
