@@ -69,7 +69,9 @@ func ConvertTraces(logger *zap.Logger, td ptrace.Traces) pmetric.Metrics {
 			logger.Debug("Skipping resource spans", zap.String("instrumentation.provider", instrumentationProvider.AsString()))
 			continue
 		}
-		rs.Resource().CopyTo(resourceMetrics.Resource())
+
+		FilterAttributes(rs.Resource().Attributes()).CopyTo(resourceMetrics.Resource().Attributes())
+
 		sdkLanguage := GetSdkLanguage(rs.Resource().Attributes())
 		for j := 0; j < rs.ScopeSpans().Len(); j++ {
 			scopeSpan := rs.ScopeSpans().At(j)

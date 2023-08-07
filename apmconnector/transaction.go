@@ -183,7 +183,7 @@ func (transaction *Transaction) ProcessServerSpan() {
 	span := transaction.RootSpan
 	metric := AddMetric(transaction.MetricSlice, "apm.service.transaction.duration")
 	dp := SetHistogramFromSpan(metric, span)
-	span.Attributes().CopyTo(dp.Attributes())
+	//span.Attributes().CopyTo(dp.Attributes())
 
 	transactionName, transactionType := GetTransactionMetricName(span)
 
@@ -209,7 +209,7 @@ func (transaction *Transaction) ProcessServerSpan() {
 	for segment, sum := range breakdownBySegment {
 		overviewMetric := AddMetric(transaction.MetricSlice, overviewMetricName)
 		overviewDp := SetHistogram(overviewMetric, span.StartTimestamp(), span.EndTimestamp(), sum)
-		span.Attributes().CopyTo(overviewDp.Attributes())
+		//span.Attributes().CopyTo(overviewDp.Attributes())
 
 		overviewDp.Attributes().PutStr("segmentName", segment)
 	}
@@ -289,4 +289,22 @@ func GetWebTransactionMetricName(span ptrace.Span, name string, nameType string)
 	} else {
 		return fmt.Sprintf("WebTransaction/%s%s", nameType, name), WebTransactionType
 	}
+}
+
+func FilterAttributes(from pcommon.Map) pcommon.Map {
+	attributes := []string{"os.description", "telemetry.auto.version", "telemetry.sdk.language", "host.name",
+		"os.type", "telemetry.sdk.name", "process.runtime.description", "process.runtime.version", "telemetry.sdk.version",
+		"host.arch", "service.name"}
+
+	f := from.AsRaw()
+	m := make(map[string]any)
+	for _, k := range attributes {
+		v, exists := f[k]
+		if exists {
+			m[k] = v
+		}
+	}
+	newMap := pcommon.NewMap()
+	newMap.FromRaw(m)
+	return newMap
 }
