@@ -208,7 +208,6 @@ func (transaction *Transaction) ProcessServerSpan() {
 	for segment, sum := range breakdownBySegment {
 		attributes["segmentName"] = segment
 		overviewMetric := transaction.AddMetric(overviewMetricName)
-		// TODO convert back to int
 		overviewMetric.AddDatapointWithValue(span, attributes, NanosToSeconds(sum))
 	}
 }
