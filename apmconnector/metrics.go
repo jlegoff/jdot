@@ -1,7 +1,6 @@
 package apmconnector
 
 import (
-	"fmt"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
@@ -18,13 +17,15 @@ type MetricBuilder interface {
 }
 
 type MetricBuilderImpl struct {
-	logger  *zap.Logger
-	metrics MetricMap
+	logger         *zap.Logger
+	metrics        MetricMap
+	transactionMap *TransactionsMap
 }
 
 func NewMetricBuilder(logger *zap.Logger) MetricBuilder {
 	mb := &MetricBuilderImpl{
-		logger: logger,
+		logger:         logger,
+		transactionMap: NewTransactionsMap(),
 	}
 	mb.Reset()
 	return mb
@@ -32,9 +33,11 @@ func NewMetricBuilder(logger *zap.Logger) MetricBuilder {
 
 func (mb *MetricBuilderImpl) Reset() {
 	mb.metrics = NewMetrics()
+	// TODO reset transaction map
 }
 
 func (mb *MetricBuilderImpl) GetMetrics() pmetric.Metrics {
+	mb.transactionMap.ProcessTransactions()
 	metrics := pmetric.NewMetrics()
 	for _, rm := range mb.metrics {
 		resourceMetrics := metrics.ResourceMetrics().AppendEmpty()
@@ -74,15 +77,9 @@ func (mb *MetricBuilderImpl) Record(resource pcommon.Resource, scope pcommon.Ins
 	resourceMetrics := mb.metrics.GetOrCreateResource(resource)
 	sdkLanguage := GetSdkLanguage(resource.Attributes())
 	scopeMetric := resourceMetrics.GetOrCreateScope(scope)
-	if span.Kind() == ptrace.SpanKindServer {
-		ProcessServerSpan(span, scopeMetric, sdkLanguage)
-	} else if span.Kind() == ptrace.SpanKindClient {
-		// filter out db calls that have no parent (so no transaction)
-		if !span.ParentSpanID().IsEmpty() {
-			ProcessClientSpan(span, scopeMetric, sdkLanguage)
-		}
-	}
 
+	transaction, traceId := mb.transactionMap.GetOrCreateTransaction(sdkLanguage, span, scopeMetric)
+	mb.transactionMap.Transactions[traceId] = transaction
 }
 
 func GetSdkLanguage(attributes pcommon.Map) string {
@@ -91,83 +88,4 @@ func GetSdkLanguage(attributes pcommon.Map) string {
 		return sdkLanguage.AsString()
 	}
 	return "unknown"
-}
-
-func ProcessDatabaseSpan(span ptrace.Span, scopeMetric *ScopeMetrics, sdkLanguage string) bool {
-	dbSystem, dbSystemPresent := span.Attributes().Get("db.system")
-	if dbSystemPresent {
-		dbOperation, dbOperationPresent := span.Attributes().Get("db.operation")
-		if dbOperationPresent {
-			dbTable, dbTablePresent := span.Attributes().Get("db.sql.table")
-			if dbTablePresent {
-				attributes := map[string]string{
-					"db.operation": dbOperation.AsString(),
-					"db.system":    dbSystem.AsString(),
-					"db.sql.table": dbTable.AsString(),
-				}
-				metric := scopeMetric.GetOrCreateMetric("apm.service.datastore.operation.duration", span, attributes)
-				metric.AddDatapoint(span, attributes)
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func ProcessExternalSpan(span ptrace.Span, scopeMetric *ScopeMetrics, sdkLanguage string) bool {
-	serverAddress, serverAddressPresent := span.Attributes().Get("server.address")
-	if serverAddressPresent {
-		attributes := map[string]string{
-			"external.host": serverAddress.AsString(),
-			// FIXME
-			"transactionType": "Web",
-		}
-		metric := scopeMetric.GetOrCreateMetric("apm.service.transaction.external.duration", span, attributes)
-		metric.AddDatapoint(span, attributes)
-		return true
-	}
-	return false
-}
-
-func ProcessClientSpan(span ptrace.Span, scopeMetric *ScopeMetrics, sdkLanguage string) {
-	if !ProcessDatabaseSpan(span, scopeMetric, sdkLanguage) {
-		ProcessExternalSpan(span, scopeMetric, sdkLanguage)
-	}
-}
-
-func ProcessServerSpan(span ptrace.Span, scopeMetric *ScopeMetrics, sdkLanguage string) {
-	attributes := map[string]string{
-		"transactionType": "Web",
-		"transactionName": GetTransactionMetricName(span),
-	}
-	metric := scopeMetric.GetOrCreateMetric("apm.service.transaction.duration", span, attributes)
-	metric.AddDatapoint(span, attributes)
-
-	overviewAttributes := map[string]string{
-		"segmentName": sdkLanguage,
-	}
-	overviewWeb := scopeMetric.GetOrCreateMetric("apm.service.overview.web", span, overviewAttributes)
-	overviewWeb.AddDatapoint(span, overviewAttributes)
-
-	txBreakdownAttributes := map[string]string{
-		"metricTimesliceName": sdkLanguage,
-		"transactionName":     GetTransactionMetricName(span),
-	}
-	txBreakdownMetric := scopeMetric.GetOrCreateMetric("apm.service.transaction.overview", span, txBreakdownAttributes)
-	txBreakdownMetric.AddDatapoint(span, txBreakdownAttributes)
-}
-
-func GetTransactionMetricName(span ptrace.Span) string {
-	httpRoute, routePresent := span.Attributes().Get("http.route")
-	if routePresent {
-		// http.request.method
-		method, methodPresent := span.Attributes().Get("http.method")
-		// http.route starts with a /
-		if methodPresent {
-			return fmt.Sprintf("WebTransaction/http.route%s (%s)", httpRoute.Str(), method.Str())
-		} else {
-			return fmt.Sprintf("WebTransaction/http.route%s", httpRoute.Str())
-		}
-	}
-	return "WebTransaction/Other/unknown"
 }

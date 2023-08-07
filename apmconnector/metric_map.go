@@ -59,7 +59,7 @@ type ScopeMetrics struct {
 	metrics map[string]*Metric
 }
 
-func (sm *ScopeMetrics) GetOrCreateMetric(metricName string, span ptrace.Span, attributes map[string]string) *Metric {
+func (sm *ScopeMetrics) GetOrCreateMetric(metricName string) *Metric {
 	metric, metricPresent := sm.metrics[metricName]
 	if metricPresent {
 		return metric
@@ -78,6 +78,11 @@ type Metric struct {
 }
 
 func (m *Metric) AddDatapoint(span ptrace.Span, dimensions map[string]string) {
+	duration := float64((span.EndTimestamp() - span.StartTimestamp()).AsTime().UnixNano()) / 1e9
+	m.AddDatapointWithValue(span, dimensions, duration)
+}
+
+func (m *Metric) AddDatapointWithValue(span ptrace.Span, dimensions map[string]string, value float64) {
 	attributes := make(map[string]string)
 	for k, v := range dimensions {
 		attributes[k] = v
@@ -93,8 +98,7 @@ func (m *Metric) AddDatapoint(span ptrace.Span, dimensions map[string]string) {
 		dp = Datapoint{histogram: histogram, attributes: attributes, startTimestamp: span.StartTimestamp(), timestamp: span.EndTimestamp()}
 		m.datapoints[GetKey(attributes)] = dp
 	}
-	duration := float64((span.EndTimestamp() - span.StartTimestamp()).AsTime().UnixNano()) / 1e9
-	dp.histogram.Update(duration)
+	dp.histogram.Update(value)
 	if dp.startTimestamp.AsTime().After(span.StartTimestamp().AsTime()) {
 		dp.startTimestamp = span.StartTimestamp()
 	}
