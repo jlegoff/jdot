@@ -289,14 +289,20 @@ func GetWebTransactionMetricName(span ptrace.Span, name string, nameType string)
 	}
 }
 
-func FilterAttributes(from pcommon.Map) pcommon.Map {
-	attributes := []string{"os.description", "telemetry.auto.version", "telemetry.sdk.language", "host.name",
-		"os.type", "telemetry.sdk.name", "process.runtime.description", "process.runtime.version", "telemetry.sdk.version",
-		"host.arch", "service.name", "service.instance.id"}
+type AttributeFilter struct {
+	attributesToKeep []string
+}
 
+func NewAttributeFilter() *AttributeFilter {
+	return &AttributeFilter{attributesToKeep: []string{"os.description", "telemetry.auto.version", "telemetry.sdk.language", "host.name",
+		"os.type", "telemetry.sdk.name", "process.runtime.description", "process.runtime.version", "telemetry.sdk.version",
+		"host.arch", "service.name", "service.instance.id"}}
+}
+
+func (attributeFilter *AttributeFilter) FilterAttributes(from pcommon.Map) pcommon.Map {
 	f := from.AsRaw()
 	m := make(map[string]any)
-	for _, k := range attributes {
+	for _, k := range attributeFilter.attributesToKeep {
 		if v, exists := f[k]; exists {
 			m[k] = v
 		}

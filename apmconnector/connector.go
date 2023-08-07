@@ -48,6 +48,7 @@ func (c *ApmConnector) Shutdown(context.Context) error {
 }
 
 func ConvertTraces(logger *zap.Logger, td ptrace.Traces) pmetric.Metrics {
+	attributesFilter := NewAttributeFilter()
 	transactions := NewTransactionsMap()
 	metrics := pmetric.NewMetrics()
 	for i := 0; i < td.ResourceSpans().Len(); i++ {
@@ -59,7 +60,7 @@ func ConvertTraces(logger *zap.Logger, td ptrace.Traces) pmetric.Metrics {
 			continue
 		}
 
-		FilterAttributes(rs.Resource().Attributes()).CopyTo(resourceMetrics.Resource().Attributes())
+		attributesFilter.FilterAttributes(rs.Resource().Attributes()).CopyTo(resourceMetrics.Resource().Attributes())
 
 		sdkLanguage := GetSdkLanguage(rs.Resource().Attributes())
 		for j := 0; j < rs.ScopeSpans().Len(); j++ {

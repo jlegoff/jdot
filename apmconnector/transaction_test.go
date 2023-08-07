@@ -16,7 +16,7 @@ func TestFilterAttributes(t *testing.T) {
 	m.PutStr("host.name", "loki")
 	m.PutStr("stuff", "meh")
 	m.PutDouble("process.pid", 1)
-	filtered := FilterAttributes(m)
+	filtered := NewAttributeFilter().FilterAttributes(m)
 
 	assert.Equal(t, 5, len(filtered.AsRaw()))
 	{
@@ -42,7 +42,7 @@ func TestFilterAttributesInstancePresent(t *testing.T) {
 	m.PutStr("host.name", "loki")
 	m.PutStr("service.instance.id", "839944")
 	m.PutDouble("process.pid", 1)
-	filtered := FilterAttributes(m)
+	filtered := NewAttributeFilter().FilterAttributes(m)
 
 	assert.Equal(t, 4, len(filtered.AsRaw()))
 	{
