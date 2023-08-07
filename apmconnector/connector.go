@@ -69,9 +69,6 @@ func ConvertTraces(logger *zap.Logger, td ptrace.Traces) pmetric.Metrics {
 		}
 
 		FilterAttributes(rs.Resource().Attributes()).CopyTo(resourceMetrics.Resource().Attributes())
-		if hostName, exists := resourceMetrics.Resource().Attributes().Get("host.name"); exists {
-			resourceMetrics.Resource().Attributes().PutStr("host", hostName.AsString())
-		}
 
 		sdkLanguage := GetSdkLanguage(rs.Resource().Attributes())
 		for j := 0; j < rs.ScopeSpans().Len(); j++ {

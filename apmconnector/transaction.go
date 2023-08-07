@@ -294,7 +294,7 @@ func GetWebTransactionMetricName(span ptrace.Span, name string, nameType string)
 func FilterAttributes(from pcommon.Map) pcommon.Map {
 	attributes := []string{"os.description", "telemetry.auto.version", "telemetry.sdk.language", "host.name",
 		"os.type", "telemetry.sdk.name", "process.runtime.description", "process.runtime.version", "telemetry.sdk.version",
-		"host.arch", "service.name"}
+		"host.arch", "service.name", "service.instance.id"}
 
 	f := from.AsRaw()
 	m := make(map[string]any)
@@ -305,5 +305,12 @@ func FilterAttributes(from pcommon.Map) pcommon.Map {
 	}
 	newMap := pcommon.NewMap()
 	newMap.FromRaw(m)
+	if hostName, exists := from.Get("host.name"); exists {
+		newMap.PutStr("host", hostName.AsString())
+
+		if _, e := newMap.Get("service.instance.id"); !e {
+			newMap.PutStr("service.instance.id", hostName.AsString())
+		}
+	}
 	return newMap
 }
