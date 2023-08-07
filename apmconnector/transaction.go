@@ -33,6 +33,7 @@ type Transaction struct {
 	SpanToChildDuration map[string]int64
 	MetricSlice         pmetric.MetricSlice
 	Measurements        map[string]Measurement
+	sqlParser           *SqlParser
 	RootSpan            ptrace.Span
 }
 
@@ -46,11 +47,12 @@ type Measurement struct {
 }
 
 type TransactionsMap struct {
+	sqlParser    *SqlParser
 	Transactions map[string]*Transaction
 }
 
 func NewTransactionsMap() *TransactionsMap {
-	return &TransactionsMap{Transactions: make(map[string]*Transaction)}
+	return &TransactionsMap{Transactions: make(map[string]*Transaction), sqlParser: NewSqlParser()}
 }
 
 func (transactions *TransactionsMap) ProcessTransactions() {
@@ -64,7 +66,7 @@ func (transactions *TransactionsMap) GetOrCreateTransaction(sdkLanguage string, 
 	transaction, txExists := transactions.Transactions[traceID]
 	if !txExists {
 		transaction = &Transaction{SdkLanguage: sdkLanguage, SpanToChildDuration: make(map[string]int64),
-			MetricSlice: metricSlice, Measurements: make(map[string]Measurement)}
+			MetricSlice: metricSlice, Measurements: make(map[string]Measurement), sqlParser: transactions.sqlParser}
 		transactions.Transactions[traceID] = transaction
 		//fmt.Printf("Created transaction for: %s   %s\n", traceID, transaction.sdkLanguage)
 	}
@@ -105,21 +107,19 @@ func NewSimpleNameProvider(name string) func(TransactionType) string {
 func (transaction *Transaction) ProcessDatabaseSpan(span ptrace.Span) bool {
 	if dbSystem, dbSystemPresent := span.Attributes().Get("db.system"); dbSystemPresent {
 		if dbOperation, dbOperationPresent := span.Attributes().Get("db.operation"); dbOperationPresent {
-			if dbTable, dbTablePresent := span.Attributes().Get("db.sql.table"); dbTablePresent {
-				attributes := pcommon.NewMap()
-				//span.Attributes().CopyTo(attributes)
-				attributes.PutStr("db.operation", dbOperation.AsString())
-				attributes.PutStr("db.system", dbSystem.AsString())
-				attributes.PutStr("db.sql.table", dbTable.AsString())
+			dbTable := transaction.sqlParser.GetDbTable(span)
+			attributes := pcommon.NewMap()
+			attributes.PutStr("db.operation", dbOperation.AsString())
+			attributes.PutStr("db.system", dbSystem.AsString())
+			attributes.PutStr("db.sql.table", dbTable)
 
-				timesliceName := fmt.Sprintf("Datastore/statement/%s/%s/%s", dbSystem.AsString(), dbTable.AsString(), dbOperation.AsString())
-				measurement := Measurement{SpanId: span.SpanID().String(), MetricName: "apm.service.datastore.operation.duration", Span: span,
-					DurationNanos: DurationInNanos(span), Attributes: attributes, SegmentNameProvider: NewSimpleNameProvider(dbSystem.AsString()), MetricTimesliceName: timesliceName}
+			timesliceName := fmt.Sprintf("Datastore/statement/%s/%s/%s", dbSystem.AsString(), dbTable, dbOperation.AsString())
+			measurement := Measurement{SpanId: span.SpanID().String(), MetricName: "apm.service.datastore.operation.duration", Span: span,
+				DurationNanos: DurationInNanos(span), Attributes: attributes, SegmentNameProvider: NewSimpleNameProvider(dbSystem.AsString()), MetricTimesliceName: timesliceName}
 
-				transaction.Measurements[measurement.SpanId] = measurement
+			transaction.Measurements[measurement.SpanId] = measurement
 
-				return true
-			}
+			return true
 		}
 	}
 	return false
