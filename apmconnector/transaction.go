@@ -183,7 +183,6 @@ func (transaction *Transaction) ProcessServerSpan() {
 	span := transaction.RootSpan
 	metric := AddMetric(transaction.MetricSlice, "apm.service.transaction.duration")
 	dp := SetHistogramFromSpan(metric, span)
-	//span.Attributes().CopyTo(dp.Attributes())
 
 	transactionName, transactionType := GetTransactionMetricName(span)
 
@@ -209,7 +208,6 @@ func (transaction *Transaction) ProcessServerSpan() {
 	for segment, sum := range breakdownBySegment {
 		overviewMetric := AddMetric(transaction.MetricSlice, overviewMetricName)
 		overviewDp := SetHistogram(overviewMetric, span.StartTimestamp(), span.EndTimestamp(), sum)
-		//span.Attributes().CopyTo(overviewDp.Attributes())
 
 		overviewDp.Attributes().PutStr("segmentName", segment)
 	}
