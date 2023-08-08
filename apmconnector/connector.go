@@ -24,7 +24,7 @@ func (c *ApmConnector) Capabilities() consumer.Capabilities {
 
 func (c *ApmConnector) ConsumeTraces(ctx context.Context, td ptrace.Traces) error {
 	if c.metricsConsumer != nil {
-		metrics := ConvertTraces(c.logger, td)
+		metrics := ConvertTraces(c.logger, c.config, td)
 		err := c.metricsConsumer.ConsumeMetrics(ctx, metrics)
 		if err != nil {
 			return err
@@ -39,6 +39,9 @@ func (c *ApmConnector) ConsumeTraces(ctx context.Context, td ptrace.Traces) erro
 
 func (c *ApmConnector) Start(_ context.Context, host component.Host) error {
 	c.logger.Info("Starting the APM Connector")
+	if c.config.ApdexT == 0 {
+		c.config.ApdexT = 0.5
+	}
 	return nil
 }
 
@@ -47,9 +50,9 @@ func (c *ApmConnector) Shutdown(context.Context) error {
 	return nil
 }
 
-func ConvertTraces(logger *zap.Logger, td ptrace.Traces) pmetric.Metrics {
+func ConvertTraces(logger *zap.Logger, config *Config, td ptrace.Traces) pmetric.Metrics {
 	attributesFilter := NewAttributeFilter()
-	transactions := NewTransactionsMap()
+	transactions := NewTransactionsMap(config.ApdexT)
 	metrics := pmetric.NewMetrics()
 	for i := 0; i < td.ResourceSpans().Len(); i++ {
 		resourceMetrics := metrics.ResourceMetrics().AppendEmpty()

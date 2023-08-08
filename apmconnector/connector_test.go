@@ -23,8 +23,9 @@ func TestConvertOneSpanToMetrics(t *testing.T) {
 	addSpan(scopeSpans, attrs, spanValues)
 
 	var logger zap.Logger
-	metrics := ConvertTraces(&logger, traces)
-	assert.Equal(t, 2, metrics.MetricCount())
+	config := Config{ApdexT: 0.5}
+	metrics := ConvertTraces(&logger, &config, traces)
+	assert.Equal(t, 3, metrics.MetricCount())
 	dp := metrics.ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics().At(0).Histogram().DataPoints().At(0)
 	assert.Equal(t, 1.0, dp.Sum())
 }

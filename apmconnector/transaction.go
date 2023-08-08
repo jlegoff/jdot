@@ -28,12 +28,32 @@ func (t TransactionType) GetOverviewMetricName() string {
 	}
 }
 
+type Apdex struct {
+	apdexSatisfying float64
+	apdexTolerating float64
+}
+
+func NewApdex(apdexT float64) Apdex {
+	return Apdex{apdexSatisfying: apdexT, apdexTolerating: apdexT * 4}
+}
+
+func (apdex Apdex) GetApdexBucket(durationInSeconds float64) string {
+	if durationInSeconds <= apdex.apdexSatisfying {
+		return "S"
+	} else if durationInSeconds <= apdex.apdexTolerating {
+		return "T"
+	} else {
+		return "F"
+	}
+}
+
 type Transaction struct {
 	SdkLanguage         string
 	SpanToChildDuration map[string]int64
 	MetricSlice         pmetric.MetricSlice
 	Measurements        map[string]Measurement
 	sqlParser           *SqlParser
+	apdex               Apdex
 	RootSpan            ptrace.Span
 }
 
@@ -48,11 +68,12 @@ type Measurement struct {
 
 type TransactionsMap struct {
 	sqlParser    *SqlParser
+	apdex        Apdex
 	Transactions map[string]*Transaction
 }
 
-func NewTransactionsMap() *TransactionsMap {
-	return &TransactionsMap{Transactions: make(map[string]*Transaction), sqlParser: NewSqlParser()}
+func NewTransactionsMap(apdexT float64) *TransactionsMap {
+	return &TransactionsMap{Transactions: make(map[string]*Transaction), sqlParser: NewSqlParser(), apdex: NewApdex(apdexT)}
 }
 
 func (transactions *TransactionsMap) ProcessTransactions() {
@@ -66,7 +87,7 @@ func (transactions *TransactionsMap) GetOrCreateTransaction(sdkLanguage string, 
 	transaction, txExists := transactions.Transactions[traceID]
 	if !txExists {
 		transaction = &Transaction{SdkLanguage: sdkLanguage, SpanToChildDuration: make(map[string]int64),
-			MetricSlice: metricSlice, Measurements: make(map[string]Measurement), sqlParser: transactions.sqlParser}
+			MetricSlice: metricSlice, Measurements: make(map[string]Measurement), sqlParser: transactions.sqlParser, apdex: transactions.apdex}
 		transactions.Transactions[traceID] = transaction
 		//fmt.Printf("Created transaction for: %s   %s\n", traceID, transaction.sdkLanguage)
 	}
@@ -128,7 +149,6 @@ func (transaction *Transaction) ProcessDatabaseSpan(span ptrace.Span) bool {
 func (transaction *Transaction) ProcessExternalSpan(span ptrace.Span) bool {
 	if serverAddress, serverAddressPresent := span.Attributes().Get("server.address"); serverAddressPresent {
 		attributes := pcommon.NewMap()
-		//span.Attributes().CopyTo(attributes)
 		attributes.PutStr("external.host", serverAddress.AsString())
 
 		segmentNameProvider := func(t TransactionType) string {
@@ -187,6 +207,7 @@ func (transaction *Transaction) ProcessServerSpan() {
 	if err {
 		transaction.IncrementErrorCount(transactionType, span.EndTimestamp())
 	}
+	transaction.GenerateApdexMetrics(span, err, transactionName, transactionType)
 
 	dp.Attributes().PutStr("transactionType", transactionType.AsString())
 	dp.Attributes().PutStr("transactionName", transactionName)
@@ -212,6 +233,19 @@ func (transaction *Transaction) ProcessServerSpan() {
 		overviewDp := SetHistogram(overviewMetric, span.StartTimestamp(), span.EndTimestamp(), sum)
 
 		overviewDp.Attributes().PutStr("segmentName", segment)
+	}
+}
+
+func (transaction *Transaction) GenerateApdexMetrics(span ptrace.Span, err bool, transactionName string, transactionType TransactionType) {
+	dp := CreateSumMetric(transaction.MetricSlice, "apm.service.apdex", span.EndTimestamp())
+
+	dp.Attributes().PutDouble("apdex.value", transaction.apdex.apdexSatisfying)
+	dp.Attributes().PutStr("transactionType", transactionType.AsString())
+	if err {
+		dp.Attributes().PutStr("apdex.bucket", "F")
+	} else {
+		durationSeconds := NanosToSeconds(DurationInNanos(span))
+		dp.Attributes().PutStr("apdex.bucket", transaction.apdex.GetApdexBucket(durationSeconds))
 	}
 }
 

@@ -7,6 +7,16 @@ import (
 	"testing"
 )
 
+func TestApdex(t *testing.T) {
+	apdex := NewApdex(0.5)
+	assert.Equal(t, "S", apdex.GetApdexBucket(0.1))
+	assert.Equal(t, "S", apdex.GetApdexBucket(0.5))
+	assert.Equal(t, "T", apdex.GetApdexBucket(0.51))
+	assert.Equal(t, "T", apdex.GetApdexBucket(1.1))
+	assert.Equal(t, "T", apdex.GetApdexBucket(2.0))
+	assert.Equal(t, "F", apdex.GetApdexBucket(2.1))
+}
+
 func TestGetTransactionMetricNameUnknown(t *testing.T) {
 	span := ptrace.NewSpan()
 
@@ -35,7 +45,7 @@ func TestGetTransactionMetricNamUrlPath(t *testing.T) {
 }
 
 func TestGetOrCreateTransaction(t *testing.T) {
-	transactions := NewTransactionsMap()
+	transactions := NewTransactionsMap(0.5)
 	span := ptrace.NewSpan()
 	var metrics pmetric.MetricSlice = pmetric.NewMetricSlice()
 	transaction, _ := transactions.GetOrCreateTransaction("java", span, metrics)
