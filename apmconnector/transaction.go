@@ -11,6 +11,12 @@ import (
 type TransactionType string
 
 const (
+	DbOperationAttributeName = "db.operation"
+	DbSystemAttributeName    = "db.system"
+	DbSqlTableAttributeName  = "db.sql.table"
+)
+
+const (
 	WebTransactionType   TransactionType = "Web"
 	OtherTransactionType TransactionType = "Other"
 )
@@ -126,13 +132,13 @@ func NewSimpleNameProvider(name string) func(TransactionType) string {
 }
 
 func (transaction *Transaction) ProcessDatabaseSpan(span ptrace.Span) bool {
-	if dbSystem, dbSystemPresent := span.Attributes().Get("db.system"); dbSystemPresent {
-		if dbOperation, dbOperationPresent := span.Attributes().Get("db.operation"); dbOperationPresent {
+	if dbSystem, dbSystemPresent := span.Attributes().Get(DbSystemAttributeName); dbSystemPresent {
+		if dbOperation, dbOperationPresent := span.Attributes().Get(DbOperationAttributeName); dbOperationPresent {
 			dbTable := transaction.sqlParser.GetDbTable(span)
 			attributes := pcommon.NewMap()
-			attributes.PutStr("db.operation", dbOperation.AsString())
-			attributes.PutStr("db.system", dbSystem.AsString())
-			attributes.PutStr("db.sql.table", dbTable)
+			attributes.PutStr(DbOperationAttributeName, dbOperation.AsString())
+			attributes.PutStr(DbSystemAttributeName, dbSystem.AsString())
+			attributes.PutStr(DbSqlTableAttributeName, dbTable)
 
 			timesliceName := fmt.Sprintf("Datastore/statement/%s/%s/%s", dbSystem.AsString(), dbTable, dbOperation.AsString())
 			measurement := Measurement{SpanId: span.SpanID().String(), MetricName: "apm.service.datastore.operation.duration", Span: span,

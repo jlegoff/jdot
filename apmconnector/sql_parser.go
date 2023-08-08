@@ -26,7 +26,7 @@ func (sqlParser *SqlParser) ParseDbTableFromSql(sql string) (string, bool) {
 }
 
 func (sqlParser *SqlParser) GetDbTable(span ptrace.Span) string {
-	dbTable, dbTablePresent := span.Attributes().Get("db.sql.table")
+	dbTable, dbTablePresent := span.Attributes().Get(DbSqlTableAttributeName)
 	if dbTablePresent {
 		return dbTable.AsString()
 	} else {
