@@ -2,7 +2,7 @@ package apmconnector
 
 import (
 	"github.com/stretchr/testify/assert"
-	"go.opentelemetry.io/collector/pdata/pmetric"
+	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"testing"
 )
@@ -47,14 +47,13 @@ func TestGetTransactionMetricNamUrlPath(t *testing.T) {
 func TestGetOrCreateTransaction(t *testing.T) {
 	transactions := NewTransactionsMap(0.5)
 	span := ptrace.NewSpan()
-	var metrics pmetric.MetricSlice = pmetric.NewMetricSlice()
-	transaction, _ := transactions.GetOrCreateTransaction("java", span, metrics)
+	transaction, _ := transactions.GetOrCreateTransaction("java", span, pcommon.NewMap())
 
 	transaction.SetRootSpan(span)
 	assert.Equal(t, true, transaction.IsRootSet())
 	transactions.ProcessTransactions()
 
-	existingTransaction, _ := transactions.GetOrCreateTransaction("java", span, metrics)
+	existingTransaction, _ := transactions.GetOrCreateTransaction("java", span, pcommon.NewMap())
 	assert.Equal(t, transaction, existingTransaction)
 	assert.Equal(t, true, existingTransaction.IsRootSet())
 }

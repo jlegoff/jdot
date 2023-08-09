@@ -53,9 +53,8 @@ func (c *ApmConnector) Shutdown(context.Context) error {
 func ConvertTraces(logger *zap.Logger, config *Config, td ptrace.Traces) pmetric.Metrics {
 	attributesFilter := NewAttributeFilter()
 	transactions := NewTransactionsMap(config.ApdexT)
-	metrics := pmetric.NewMetrics()
+
 	for i := 0; i < td.ResourceSpans().Len(); i++ {
-		resourceMetrics := metrics.ResourceMetrics().AppendEmpty()
 		rs := td.ResourceSpans().At(i)
 		instrumentationProvider, instrumentationProviderPresent := rs.Resource().Attributes().Get("instrumentation.provider")
 		if instrumentationProviderPresent && instrumentationProvider.AsString() != "opentelemetry" {
@@ -63,21 +62,20 @@ func ConvertTraces(logger *zap.Logger, config *Config, td ptrace.Traces) pmetric
 			continue
 		}
 
-		attributesFilter.FilterAttributes(rs.Resource().Attributes()).CopyTo(resourceMetrics.Resource().Attributes())
+		resourceAttributes := attributesFilter.FilterAttributes(rs.Resource().Attributes())
 
 		sdkLanguage := GetSdkLanguage(rs.Resource().Attributes())
 		for j := 0; j < rs.ScopeSpans().Len(); j++ {
 			scopeSpan := rs.ScopeSpans().At(j)
-			scopeMetric := resourceMetrics.ScopeMetrics().AppendEmpty()
 			for k := 0; k < scopeSpan.Spans().Len(); k++ {
 				span := scopeSpan.Spans().At(k)
 				if k == 0 {
-					if hostName, exists := resourceMetrics.Resource().Attributes().Get("host.name"); exists {
-						GenerateInstanceMetric(scopeMetric, hostName.AsString(), span.EndTimestamp())
+					if hostName, exists := resourceAttributes.Get("host.name"); exists {
+						GenerateInstanceMetric(transactions.MeterProvider, resourceAttributes, hostName.AsString(), span.EndTimestamp())
 					}
 				}
 
-				transaction, _ := transactions.GetOrCreateTransaction(sdkLanguage, span, scopeMetric.Metrics())
+				transaction, _ := transactions.GetOrCreateTransaction(sdkLanguage, span, resourceAttributes)
 
 				//fmt.Printf("Span kind: %s Name: %s Trace Id: %s Span id: %s Parent: %s\n", span.Kind(), span.Name(), span.TraceID().String(), span.SpanID().String(), span.ParentSpanID().String())
 
@@ -89,5 +87,5 @@ func ConvertTraces(logger *zap.Logger, config *Config, td ptrace.Traces) pmetric
 
 	transactions.ProcessTransactions()
 
-	return metrics
+	return transactions.MeterProvider.Metrics
 }

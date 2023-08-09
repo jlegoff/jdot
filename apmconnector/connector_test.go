@@ -22,11 +22,17 @@ func TestConvertOneSpanToMetrics(t *testing.T) {
 	spanValues := []TestSpan{{Start: start, End: end, Name: "span", Kind: ptrace.SpanKindServer}}
 	addSpan(scopeSpans, attrs, spanValues)
 
-	var logger zap.Logger
+	logger, _ := zap.NewDevelopment()
 	config := Config{ApdexT: 0.5}
-	metrics := ConvertTraces(&logger, &config, traces)
+	metrics := ConvertTraces(logger, &config, traces)
 	assert.Equal(t, 3, metrics.MetricCount())
-	dp := metrics.ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics().At(0).Histogram().DataPoints().At(0)
+	rm := metrics.ResourceMetrics().At(0)
+	serviceName, _ := rm.Resource().Attributes().Get("service.name")
+	assert.Equal(t, "service", serviceName.AsString())
+	sm := rm.ScopeMetrics().At(0)
+	metric := sm.Metrics().At(0)
+	assert.Equal(t, "apm.service.transaction.duration", metric.Name())
+	dp := metric.Histogram().DataPoints().At(0)
 	assert.Equal(t, 1.0, dp.Sum())
 }
 

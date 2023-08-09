@@ -32,6 +32,8 @@ func (sqlParser *SqlParser) GetDbTable(span ptrace.Span) string {
 	} else {
 		if sql, sqlPresent := span.Attributes().Get("db.statement"); sqlPresent {
 			if parsedTable, exists := sqlParser.ParseDbTableFromSql(sql.AsString()); exists {
+				// FIXME figure out how to mutate spans
+				//span.Attributes().PutStr(DbSqlTableAttributeName, parsedTable)
 				return parsedTable
 			}
 		}

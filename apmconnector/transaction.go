@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"go.opentelemetry.io/collector/pdata/pcommon"
-	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 )
 
@@ -56,7 +55,8 @@ func (apdex Apdex) GetApdexBucket(durationInSeconds float64) string {
 type Transaction struct {
 	SdkLanguage         string
 	SpanToChildDuration map[string]int64
-	MetricSlice         pmetric.MetricSlice
+	ResourceAttributes  pcommon.Map
+	meterProvider       *MeterProvider
 	Measurements        map[string]Measurement
 	sqlParser           *SqlParser
 	apdex               Apdex
@@ -73,13 +73,14 @@ type Measurement struct {
 }
 
 type TransactionsMap struct {
-	sqlParser    *SqlParser
-	apdex        Apdex
-	Transactions map[string]*Transaction
+	sqlParser     *SqlParser
+	apdex         Apdex
+	Transactions  map[string]*Transaction
+	MeterProvider *MeterProvider
 }
 
 func NewTransactionsMap(apdexT float64) *TransactionsMap {
-	return &TransactionsMap{Transactions: make(map[string]*Transaction), sqlParser: NewSqlParser(), apdex: NewApdex(apdexT)}
+	return &TransactionsMap{Transactions: make(map[string]*Transaction), sqlParser: NewSqlParser(), apdex: NewApdex(apdexT), MeterProvider: NewMeterProvider()}
 }
 
 func (transactions *TransactionsMap) ProcessTransactions() {
@@ -88,12 +89,12 @@ func (transactions *TransactionsMap) ProcessTransactions() {
 	}
 }
 
-func (transactions *TransactionsMap) GetOrCreateTransaction(sdkLanguage string, span ptrace.Span, metricSlice pmetric.MetricSlice) (*Transaction, string) {
+func (transactions *TransactionsMap) GetOrCreateTransaction(sdkLanguage string, span ptrace.Span, resourceAttributes pcommon.Map) (*Transaction, string) {
 	traceID := span.TraceID().String()
 	transaction, txExists := transactions.Transactions[traceID]
 	if !txExists {
-		transaction = &Transaction{SdkLanguage: sdkLanguage, SpanToChildDuration: make(map[string]int64),
-			MetricSlice: metricSlice, Measurements: make(map[string]Measurement), sqlParser: transactions.sqlParser, apdex: transactions.apdex}
+		transaction = &Transaction{SdkLanguage: sdkLanguage, SpanToChildDuration: make(map[string]int64), meterProvider: transactions.MeterProvider,
+			ResourceAttributes: resourceAttributes, Measurements: make(map[string]Measurement), sqlParser: transactions.sqlParser, apdex: transactions.apdex}
 		transactions.Transactions[traceID] = transaction
 		//fmt.Printf("Created transaction for: %s   %s\n", traceID, transaction.sdkLanguage)
 	}
@@ -139,6 +140,10 @@ func (transaction *Transaction) ProcessDatabaseSpan(span ptrace.Span) bool {
 			attributes.PutStr(DbOperationAttributeName, dbOperation.AsString())
 			attributes.PutStr(DbSystemAttributeName, dbSystem.AsString())
 			attributes.PutStr(DbSqlTableAttributeName, dbTable)
+
+			if netPeerName, exists := span.Attributes().Get("net.peer.name"); exists {
+				attributes.PutStr("net.peer.name", netPeerName.AsString())
+			}
 
 			timesliceName := fmt.Sprintf("Datastore/statement/%s/%s/%s", dbSystem.AsString(), dbTable, dbOperation.AsString())
 			measurement := Measurement{SpanId: span.SpanID().String(), MetricName: "apm.service.datastore.operation.duration", Span: span,
@@ -204,8 +209,6 @@ func (transaction *Transaction) ProcessServerSpan() {
 		return
 	}
 	span := transaction.RootSpan
-	metric := AddMetric(transaction.MetricSlice, "apm.service.transaction.duration")
-	dp := SetHistogramFromSpan(metric, span)
 
 	transactionName, transactionType := GetTransactionMetricName(span)
 
@@ -213,10 +216,22 @@ func (transaction *Transaction) ProcessServerSpan() {
 	if err {
 		transaction.IncrementErrorCount(transactionType, span.EndTimestamp())
 	}
+
+	{
+		attributes := pcommon.NewMap()
+		attributes.PutStr("transactionType", transactionType.AsString())
+		attributes.PutStr("transactionName", transactionName)
+
+		transaction.meterProvider.RecordHistogramFromSpan("apm.service.transaction.duration", transaction.ResourceAttributes, attributes, span)
+	}
 	transaction.GenerateApdexMetrics(span, err, transactionName, transactionType)
 
-	dp.Attributes().PutStr("transactionType", transactionType.AsString())
-	dp.Attributes().PutStr("transactionName", transactionName)
+	/* FIXME
+	//span.Attributes().EnsureCapacity(span.Attributes().Len() + 2)
+	span.Attributes().PutStr("transactionType", transactionType.AsString())
+	span.Attributes().PutStr("transactionName", transactionName)
+	fmt.Println("Attribute len after: ", span.Attributes().Len())
+	*/
 
 	breakdownBySegment := make(map[string]int64)
 	totalBreakdownNanos := int64(0)
@@ -235,29 +250,31 @@ func (transaction *Transaction) ProcessServerSpan() {
 	overviewMetricName := transactionType.GetOverviewMetricName()
 
 	for segment, sum := range breakdownBySegment {
-		overviewMetric := AddMetric(transaction.MetricSlice, overviewMetricName)
-		overviewDp := SetHistogram(overviewMetric, span.StartTimestamp(), span.EndTimestamp(), sum)
+		attributes := pcommon.NewMap()
+		attributes.PutStr("segmentName", segment)
 
-		overviewDp.Attributes().PutStr("segmentName", segment)
+		transaction.meterProvider.RecordHistogram(overviewMetricName, transaction.ResourceAttributes, attributes,
+			span.StartTimestamp(), span.EndTimestamp(), sum)
 	}
 }
 
 func (transaction *Transaction) GenerateApdexMetrics(span ptrace.Span, err bool, transactionName string, transactionType TransactionType) {
-	dp := CreateSumMetric(transaction.MetricSlice, "apm.service.apdex", span.EndTimestamp())
-
-	dp.Attributes().PutDouble("apdex.value", transaction.apdex.apdexSatisfying)
-	dp.Attributes().PutStr("transactionType", transactionType.AsString())
+	attributes := pcommon.NewMap()
+	attributes.PutDouble("apdex.value", transaction.apdex.apdexSatisfying)
+	attributes.PutStr("transactionType", transactionType.AsString())
 	if err {
-		dp.Attributes().PutStr("apdex.bucket", "F")
+		attributes.PutStr("apdex.bucket", "F")
 	} else {
 		durationSeconds := NanosToSeconds(DurationInNanos(span))
-		dp.Attributes().PutStr("apdex.bucket", transaction.apdex.GetApdexBucket(durationSeconds))
+		attributes.PutStr("apdex.bucket", transaction.apdex.GetApdexBucket(durationSeconds))
 	}
+	transaction.meterProvider.IncrementSum("apm.service.apdex", transaction.ResourceAttributes, attributes, span.EndTimestamp())
 }
 
 func (transaction *Transaction) IncrementErrorCount(transactionType TransactionType, timestamp pcommon.Timestamp) {
-	dp := CreateSumMetric(transaction.MetricSlice, "apm.service.error.count", timestamp)
-	dp.Attributes().PutStr("transactionType", transactionType.AsString())
+	attributes := pcommon.NewMap()
+	attributes.PutStr("transactionType", transactionType.AsString())
+	transaction.meterProvider.IncrementSum("apm.service.error.count", transaction.ResourceAttributes, attributes, timestamp)
 }
 
 func (transaction *Transaction) ProcessMeasurement(measurement *Measurement, transactionType TransactionType, transactionName string) {
@@ -269,16 +286,17 @@ func (transaction *Transaction) ProcessMeasurement(measurement *Measurement, tra
 	measurement.Attributes.PutStr("transactionType", transactionType.AsString())
 	measurement.Attributes.PutStr("scope", transactionName)
 
-	metric := AddMetric(transaction.MetricSlice, measurement.MetricName)
-	metricDp := SetHistogramFromSpan(metric, measurement.Span)
-	measurement.Attributes.CopyTo(metricDp.Attributes())
+	transaction.meterProvider.RecordHistogramFromSpan(measurement.MetricName, transaction.ResourceAttributes, measurement.Attributes, measurement.Span)
 
-	overviewMetric := AddMetric(transaction.MetricSlice, "apm.service.transaction.overview")
-	overviewMetricDp := SetHistogram(overviewMetric, measurement.Span.StartTimestamp(), measurement.Span.EndTimestamp(), exclusiveDuration)
-	// we might not need transactionName here..
-	measurement.Attributes.PutStr("transactionName", transactionName)
+	{
+		attributes := pcommon.NewMap()
+		measurement.Attributes.CopyTo(attributes)
+		// we might not need transactionName here..
+		attributes.PutStr("transactionName", transactionName)
 
-	measurement.Attributes.CopyTo(overviewMetricDp.Attributes())
+		transaction.meterProvider.RecordHistogram("apm.service.transaction.overview", transaction.ResourceAttributes, attributes,
+			measurement.Span.StartTimestamp(), measurement.Span.EndTimestamp(), exclusiveDuration)
+	}
 }
 
 func DurationInNanos(span ptrace.Span) int64 {
@@ -287,36 +305,6 @@ func DurationInNanos(span ptrace.Span) int64 {
 
 func (measurement Measurement) ExclusiveTime(transaction *Transaction) int64 {
 	return measurement.DurationNanos - transaction.SpanToChildDuration[measurement.SpanId]
-}
-
-func AddMetric(metrics pmetric.MetricSlice, metricName string) pmetric.Metric {
-	metric := metrics.AppendEmpty()
-	metric.SetName(metricName)
-	metric.SetUnit("s")
-	return metric
-}
-
-func NanosToSeconds(nanos int64) float64 {
-	return float64(nanos) / 1e9
-}
-
-func SetHistogramFromSpan(metric pmetric.Metric, span ptrace.Span) pmetric.HistogramDataPoint {
-	return SetHistogram(metric, span.StartTimestamp(), span.EndTimestamp(), (span.EndTimestamp() - span.StartTimestamp()).AsTime().UnixNano())
-}
-
-func SetHistogram(metric pmetric.Metric, startTimestamp, endTimestamp pcommon.Timestamp, durationNanos int64) pmetric.HistogramDataPoint {
-	histogram := metric.SetEmptyHistogram()
-	histogram.SetAggregationTemporality(pmetric.AggregationTemporalityDelta)
-	dp := histogram.DataPoints().AppendEmpty()
-	dp.SetStartTimestamp(startTimestamp)
-	dp.SetTimestamp(endTimestamp)
-
-	duration := NanosToSeconds(durationNanos)
-	dp.SetSum(duration)
-	dp.SetCount(1)
-	dp.SetMin(duration)
-	dp.SetMax(duration)
-	return dp
 }
 
 func GetTransactionMetricName(span ptrace.Span) (string, TransactionType) {
@@ -346,23 +334,9 @@ func GetSdkLanguage(attributes pcommon.Map) string {
 }
 
 // Generate the metrc used for the host instances drop down
-func GenerateInstanceMetric(scopeMetrics pmetric.ScopeMetrics, hostName string, timestamp pcommon.Timestamp) {
-	dp := CreateSumMetric(scopeMetrics.Metrics(), "apm.service.instance.count", timestamp)
-
-	dp.Attributes().PutStr("instanceName", hostName)
-	dp.Attributes().PutStr("host.displayName", hostName)
-}
-
-func CreateSumMetric(metrics pmetric.MetricSlice, metricName string, timestamp pcommon.Timestamp) pmetric.NumberDataPoint {
-	metric := metrics.AppendEmpty()
-	metric.SetName(metricName)
-	sum := metric.SetEmptySum()
-	sum.SetAggregationTemporality(pmetric.AggregationTemporalityCumulative)
-	sum.SetIsMonotonic(false)
-	dp := sum.DataPoints().AppendEmpty()
-
-	dp.SetTimestamp(timestamp)
-
-	dp.SetIntValue(1)
-	return dp
+func GenerateInstanceMetric(meterProvider *MeterProvider, resourceAttributes pcommon.Map, hostName string, timestamp pcommon.Timestamp) {
+	attributes := pcommon.NewMap()
+	attributes.PutStr("instanceName", hostName)
+	attributes.PutStr("host.displayName", hostName)
+	meterProvider.IncrementSum("apm.service.instance.count", resourceAttributes, pcommon.NewMap(), timestamp)
 }
