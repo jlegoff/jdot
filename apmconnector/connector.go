@@ -53,6 +53,7 @@ func (c *ApmConnector) Shutdown(context.Context) error {
 func ConvertTraces(logger *zap.Logger, config *Config, td ptrace.Traces) pmetric.Metrics {
 	attributesFilter := NewAttributeFilter()
 	transactions := NewTransactionsMap(config.ApdexT)
+	meterProvider := NewMeterProvider()
 
 	for i := 0; i < td.ResourceSpans().Len(); i++ {
 		rs := td.ResourceSpans().At(i)
@@ -63,6 +64,7 @@ func ConvertTraces(logger *zap.Logger, config *Config, td ptrace.Traces) pmetric
 		}
 
 		resourceAttributes := attributesFilter.FilterAttributes(rs.Resource().Attributes())
+		resourceMetrics := meterProvider.getOrCreateResourceMetrics(resourceAttributes)
 
 		sdkLanguage := GetSdkLanguage(rs.Resource().Attributes())
 		for j := 0; j < rs.ScopeSpans().Len(); j++ {
@@ -71,11 +73,11 @@ func ConvertTraces(logger *zap.Logger, config *Config, td ptrace.Traces) pmetric
 				span := scopeSpan.Spans().At(k)
 				if k == 0 {
 					if hostName, exists := resourceAttributes.Get("host.name"); exists {
-						GenerateInstanceMetric(transactions.MeterProvider, resourceAttributes, hostName.AsString(), span.EndTimestamp())
+						GenerateInstanceMetric(resourceMetrics, hostName.AsString(), span.EndTimestamp())
 					}
 				}
 
-				transaction, _ := transactions.GetOrCreateTransaction(sdkLanguage, span, resourceAttributes)
+				transaction, _ := transactions.GetOrCreateTransaction(sdkLanguage, span, resourceMetrics)
 
 				//fmt.Printf("Span kind: %s Name: %s Trace Id: %s Span id: %s Parent: %s\n", span.Kind(), span.Name(), span.TraceID().String(), span.SpanID().String(), span.ParentSpanID().String())
 
@@ -87,5 +89,5 @@ func ConvertTraces(logger *zap.Logger, config *Config, td ptrace.Traces) pmetric
 
 	transactions.ProcessTransactions()
 
-	return transactions.MeterProvider.Metrics
+	return meterProvider.Metrics
 }

@@ -47,13 +47,15 @@ func TestGetTransactionMetricNamUrlPath(t *testing.T) {
 func TestGetOrCreateTransaction(t *testing.T) {
 	transactions := NewTransactionsMap(0.5)
 	span := ptrace.NewSpan()
-	transaction, _ := transactions.GetOrCreateTransaction("java", span, pcommon.NewMap())
+	meterProvider := NewMeterProvider()
+	metrics := meterProvider.getOrCreateResourceMetrics(pcommon.NewMap())
+	transaction, _ := transactions.GetOrCreateTransaction("java", span, metrics)
 
 	transaction.SetRootSpan(span)
 	assert.Equal(t, true, transaction.IsRootSet())
 	transactions.ProcessTransactions()
 
-	existingTransaction, _ := transactions.GetOrCreateTransaction("java", span, pcommon.NewMap())
+	existingTransaction, _ := transactions.GetOrCreateTransaction("java", span, metrics)
 	assert.Equal(t, transaction, existingTransaction)
 	assert.Equal(t, true, existingTransaction.IsRootSet())
 }

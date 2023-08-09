@@ -11,8 +11,9 @@ import (
 )
 
 type MeterProvider struct {
-	Metrics         pmetric.Metrics
-	resourceMetrics map[string]ResourceMetrics
+	Metrics pmetric.Metrics
+	// key is a hash of attributes
+	resourceMetrics map[string]*ResourceMetrics
 }
 
 type ResourceMetrics struct {
@@ -21,18 +22,30 @@ type ResourceMetrics struct {
 }
 
 func NewMeterProvider() *MeterProvider {
-	return &MeterProvider{Metrics: pmetric.NewMetrics(), resourceMetrics: make(map[string]ResourceMetrics)}
+	return &MeterProvider{Metrics: pmetric.NewMetrics(), resourceMetrics: make(map[string]*ResourceMetrics)}
 }
 
-func (meterProvider *MeterProvider) RecordHistogramFromSpan(metricName string, resourceAttributes, attributes pcommon.Map,
+func (meterProvider *MeterProvider) getOrCreateResourceMetrics(attributes pcommon.Map) *ResourceMetrics {
+	key := GetKeyFromMap(attributes)
+	if metrics, exists := meterProvider.resourceMetrics[key]; exists {
+		return metrics
+	} else {
+		resourceMetrics := meterProvider.Metrics.ResourceMetrics().AppendEmpty()
+		attributes.CopyTo(resourceMetrics.Resource().Attributes())
+		metrics := resourceMetrics.ScopeMetrics().AppendEmpty().Metrics()
+		rm := &ResourceMetrics{metrics: metrics, nameToMetric: make(map[string]pmetric.Metric)}
+		meterProvider.resourceMetrics[key] = rm
+		return rm
+	}
+}
+
+func (resourceMetrics ResourceMetrics) RecordHistogramFromSpan(metricName string, attributes pcommon.Map,
 	span ptrace.Span) pmetric.HistogramDataPoint {
-	return meterProvider.RecordHistogram(metricName, resourceAttributes, attributes, span.StartTimestamp(), span.EndTimestamp(), (span.EndTimestamp() - span.StartTimestamp()).AsTime().UnixNano())
+	return resourceMetrics.RecordHistogram(metricName, attributes, span.StartTimestamp(), span.EndTimestamp(), (span.EndTimestamp() - span.StartTimestamp()).AsTime().UnixNano())
 }
 
-func (meterProvider *MeterProvider) RecordHistogram(metricName string, resourceAttributes, attributes pcommon.Map,
+func (metrics ResourceMetrics) RecordHistogram(metricName string, attributes pcommon.Map,
 	startTimestamp, endTimestamp pcommon.Timestamp, durationNanos int64) pmetric.HistogramDataPoint {
-
-	metrics := meterProvider.getResourceMetrics(resourceAttributes)
 
 	histogram := metrics.GetOrCreateHistogramMetric(metricName)
 	dp := histogram.DataPoints().AppendEmpty()
@@ -48,21 +61,7 @@ func (meterProvider *MeterProvider) RecordHistogram(metricName string, resourceA
 	return dp
 }
 
-func (meterProvider *MeterProvider) getResourceMetrics(attributes pcommon.Map) ResourceMetrics {
-	key := GetKeyFromMap(attributes)
-	if metrics, exists := meterProvider.resourceMetrics[key]; exists {
-		return metrics
-	} else {
-		resourceMetrics := meterProvider.Metrics.ResourceMetrics().AppendEmpty()
-		attributes.CopyTo(resourceMetrics.Resource().Attributes())
-		metrics := resourceMetrics.ScopeMetrics().AppendEmpty().Metrics()
-		rm := ResourceMetrics{metrics: metrics, nameToMetric: make(map[string]pmetric.Metric)}
-		meterProvider.resourceMetrics[key] = rm
-		return rm
-	}
-}
-
-func (metrics ResourceMetrics) GetOrCreateHistogramMetric(metricName string) pmetric.Histogram {
+func (metrics *ResourceMetrics) GetOrCreateHistogramMetric(metricName string) pmetric.Histogram {
 	init := func(metric pmetric.Metric) {
 		metric.SetUnit("s")
 
@@ -73,7 +72,7 @@ func (metrics ResourceMetrics) GetOrCreateHistogramMetric(metricName string) pme
 	return metric.Histogram()
 }
 
-func (metrics ResourceMetrics) GetOrCreateSumMetric(metricName string) pmetric.Sum {
+func (metrics *ResourceMetrics) GetOrCreateSumMetric(metricName string) pmetric.Sum {
 	init := func(metric pmetric.Metric) {
 		sum := metric.SetEmptySum()
 		sum.SetAggregationTemporality(pmetric.AggregationTemporalityCumulative)
@@ -83,7 +82,7 @@ func (metrics ResourceMetrics) GetOrCreateSumMetric(metricName string) pmetric.S
 	return metric.Sum()
 }
 
-func (metrics ResourceMetrics) GetOrCreateMetric(metricName string, init func(pmetric.Metric)) pmetric.Metric {
+func (metrics *ResourceMetrics) GetOrCreateMetric(metricName string, init func(pmetric.Metric)) pmetric.Metric {
 	if metric, exists := metrics.nameToMetric[metricName]; exists {
 		return metric
 	} else {
@@ -95,9 +94,8 @@ func (metrics ResourceMetrics) GetOrCreateMetric(metricName string, init func(pm
 	}
 }
 
-func (meterProvider *MeterProvider) IncrementSum(metricName string, resourceAttributes, attributes pcommon.Map,
+func (metrics *ResourceMetrics) IncrementSum(metricName string, attributes pcommon.Map,
 	timestamp pcommon.Timestamp) pmetric.NumberDataPoint {
-	metrics := meterProvider.getResourceMetrics(resourceAttributes)
 
 	sum := metrics.GetOrCreateSumMetric(metricName)
 	dp := sum.DataPoints().AppendEmpty()

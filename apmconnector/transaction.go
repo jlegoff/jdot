@@ -55,8 +55,7 @@ func (apdex Apdex) GetApdexBucket(durationInSeconds float64) string {
 type Transaction struct {
 	SdkLanguage         string
 	SpanToChildDuration map[string]int64
-	ResourceAttributes  pcommon.Map
-	meterProvider       *MeterProvider
+	resourceMetrics     *ResourceMetrics
 	Measurements        map[string]Measurement
 	sqlParser           *SqlParser
 	apdex               Apdex
@@ -73,14 +72,13 @@ type Measurement struct {
 }
 
 type TransactionsMap struct {
-	sqlParser     *SqlParser
-	apdex         Apdex
-	Transactions  map[string]*Transaction
-	MeterProvider *MeterProvider
+	sqlParser    *SqlParser
+	apdex        Apdex
+	Transactions map[string]*Transaction
 }
 
 func NewTransactionsMap(apdexT float64) *TransactionsMap {
-	return &TransactionsMap{Transactions: make(map[string]*Transaction), sqlParser: NewSqlParser(), apdex: NewApdex(apdexT), MeterProvider: NewMeterProvider()}
+	return &TransactionsMap{Transactions: make(map[string]*Transaction), sqlParser: NewSqlParser(), apdex: NewApdex(apdexT)}
 }
 
 func (transactions *TransactionsMap) ProcessTransactions() {
@@ -89,12 +87,12 @@ func (transactions *TransactionsMap) ProcessTransactions() {
 	}
 }
 
-func (transactions *TransactionsMap) GetOrCreateTransaction(sdkLanguage string, span ptrace.Span, resourceAttributes pcommon.Map) (*Transaction, string) {
+func (transactions *TransactionsMap) GetOrCreateTransaction(sdkLanguage string, span ptrace.Span, resourceMetrics *ResourceMetrics) (*Transaction, string) {
 	traceID := span.TraceID().String()
 	transaction, txExists := transactions.Transactions[traceID]
 	if !txExists {
-		transaction = &Transaction{SdkLanguage: sdkLanguage, SpanToChildDuration: make(map[string]int64), meterProvider: transactions.MeterProvider,
-			ResourceAttributes: resourceAttributes, Measurements: make(map[string]Measurement), sqlParser: transactions.sqlParser, apdex: transactions.apdex}
+		transaction = &Transaction{SdkLanguage: sdkLanguage, SpanToChildDuration: make(map[string]int64),
+			resourceMetrics: resourceMetrics, Measurements: make(map[string]Measurement), sqlParser: transactions.sqlParser, apdex: transactions.apdex}
 		transactions.Transactions[traceID] = transaction
 		//fmt.Printf("Created transaction for: %s   %s\n", traceID, transaction.sdkLanguage)
 	}
@@ -222,7 +220,7 @@ func (transaction *Transaction) ProcessServerSpan() {
 		attributes.PutStr("transactionType", transactionType.AsString())
 		attributes.PutStr("transactionName", transactionName)
 
-		transaction.meterProvider.RecordHistogramFromSpan("apm.service.transaction.duration", transaction.ResourceAttributes, attributes, span)
+		transaction.resourceMetrics.RecordHistogramFromSpan("apm.service.transaction.duration", attributes, span)
 	}
 	transaction.GenerateApdexMetrics(span, err, transactionName, transactionType)
 
@@ -253,7 +251,7 @@ func (transaction *Transaction) ProcessServerSpan() {
 		attributes := pcommon.NewMap()
 		attributes.PutStr("segmentName", segment)
 
-		transaction.meterProvider.RecordHistogram(overviewMetricName, transaction.ResourceAttributes, attributes,
+		transaction.resourceMetrics.RecordHistogram(overviewMetricName, attributes,
 			span.StartTimestamp(), span.EndTimestamp(), sum)
 	}
 }
@@ -268,13 +266,13 @@ func (transaction *Transaction) GenerateApdexMetrics(span ptrace.Span, err bool,
 		durationSeconds := NanosToSeconds(DurationInNanos(span))
 		attributes.PutStr("apdex.bucket", transaction.apdex.GetApdexBucket(durationSeconds))
 	}
-	transaction.meterProvider.IncrementSum("apm.service.apdex", transaction.ResourceAttributes, attributes, span.EndTimestamp())
+	transaction.resourceMetrics.IncrementSum("apm.service.apdex", attributes, span.EndTimestamp())
 }
 
 func (transaction *Transaction) IncrementErrorCount(transactionType TransactionType, timestamp pcommon.Timestamp) {
 	attributes := pcommon.NewMap()
 	attributes.PutStr("transactionType", transactionType.AsString())
-	transaction.meterProvider.IncrementSum("apm.service.error.count", transaction.ResourceAttributes, attributes, timestamp)
+	transaction.resourceMetrics.IncrementSum("apm.service.error.count", attributes, timestamp)
 }
 
 func (transaction *Transaction) ProcessMeasurement(measurement *Measurement, transactionType TransactionType, transactionName string) {
@@ -286,7 +284,7 @@ func (transaction *Transaction) ProcessMeasurement(measurement *Measurement, tra
 	measurement.Attributes.PutStr("transactionType", transactionType.AsString())
 	measurement.Attributes.PutStr("scope", transactionName)
 
-	transaction.meterProvider.RecordHistogramFromSpan(measurement.MetricName, transaction.ResourceAttributes, measurement.Attributes, measurement.Span)
+	transaction.resourceMetrics.RecordHistogramFromSpan(measurement.MetricName, measurement.Attributes, measurement.Span)
 
 	{
 		attributes := pcommon.NewMap()
@@ -294,7 +292,7 @@ func (transaction *Transaction) ProcessMeasurement(measurement *Measurement, tra
 		// we might not need transactionName here..
 		attributes.PutStr("transactionName", transactionName)
 
-		transaction.meterProvider.RecordHistogram("apm.service.transaction.overview", transaction.ResourceAttributes, attributes,
+		transaction.resourceMetrics.RecordHistogram("apm.service.transaction.overview", attributes,
 			measurement.Span.StartTimestamp(), measurement.Span.EndTimestamp(), exclusiveDuration)
 	}
 }
@@ -334,9 +332,9 @@ func GetSdkLanguage(attributes pcommon.Map) string {
 }
 
 // Generate the metrc used for the host instances drop down
-func GenerateInstanceMetric(meterProvider *MeterProvider, resourceAttributes pcommon.Map, hostName string, timestamp pcommon.Timestamp) {
+func GenerateInstanceMetric(resourceMetrics *ResourceMetrics, hostName string, timestamp pcommon.Timestamp) {
 	attributes := pcommon.NewMap()
 	attributes.PutStr("instanceName", hostName)
 	attributes.PutStr("host.displayName", hostName)
-	meterProvider.IncrementSum("apm.service.instance.count", resourceAttributes, pcommon.NewMap(), timestamp)
+	resourceMetrics.IncrementSum("apm.service.instance.count", pcommon.NewMap(), timestamp)
 }
