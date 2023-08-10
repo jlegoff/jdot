@@ -1,6 +1,7 @@
 package apmconnector
 
 import (
+	"fmt"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 )
