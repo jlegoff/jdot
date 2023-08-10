@@ -4,6 +4,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
+	"go.uber.org/zap"
 	"testing"
 	"time"
 )
@@ -21,9 +22,17 @@ func TestConvertOneSpanToMetrics(t *testing.T) {
 	spanValues := []TestSpan{{Start: start, End: end, Name: "span", Kind: ptrace.SpanKindServer}}
 	addSpan(scopeSpans, attrs, spanValues)
 
-	metrics := ConvertTraces(traces)
-	assert.Equal(t, 1, metrics.MetricCount())
-	dp := metrics.ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics().At(0).Histogram().DataPoints().At(0)
+	logger, _ := zap.NewDevelopment()
+	config := Config{ApdexT: 0.5}
+	metrics := ConvertTraces(logger, &config, traces)
+	assert.Equal(t, 3, metrics.MetricCount())
+	rm := metrics.ResourceMetrics().At(0)
+	serviceName, _ := rm.Resource().Attributes().Get("service.name")
+	assert.Equal(t, "service", serviceName.AsString())
+	sm := rm.ScopeMetrics().At(0)
+	metric := sm.Metrics().At(0)
+	assert.Equal(t, "apm.service.transaction.duration", metric.Name())
+	dp := metric.Histogram().DataPoints().At(0)
 	assert.Equal(t, 1.0, dp.Sum())
 }
 
