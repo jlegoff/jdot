@@ -25,15 +25,14 @@ func (sqlParser *SqlParser) ParseDbTableFromSql(sql string) (string, bool) {
 	return strings.ToLower(matches[1]), true
 }
 
-func (sqlParser *SqlParser) GetDbTable(span ptrace.Span) string {
+func (sqlParser *SqlParser) AddDbTableToSpan(span ptrace.Span) string {
 	dbTable, dbTablePresent := span.Attributes().Get(DbSqlTableAttributeName)
 	if dbTablePresent {
 		return dbTable.AsString()
 	} else {
 		if sql, sqlPresent := span.Attributes().Get("db.statement"); sqlPresent {
 			if parsedTable, exists := sqlParser.ParseDbTableFromSql(sql.AsString()); exists {
-				// FIXME figure out how to mutate spans
-				//span.Attributes().PutStr(DbSqlTableAttributeName, parsedTable)
+				span.Attributes().PutStr(DbSqlTableAttributeName, parsedTable)
 				return parsedTable
 			}
 		}
