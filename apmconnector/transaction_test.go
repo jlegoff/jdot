@@ -19,6 +19,7 @@ func TestApdex(t *testing.T) {
 
 func TestGetTransactionMetricNameUnknown(t *testing.T) {
 	span := ptrace.NewSpan()
+	span.SetKind(ptrace.SpanKindServer)
 
 	name, txType := GetTransactionMetricName(span)
 	assert.Equal(t, "WebTransaction/Other/unknown", name)
@@ -28,6 +29,7 @@ func TestGetTransactionMetricNameUnknown(t *testing.T) {
 
 func TestGetTransactionMetricNamRoute(t *testing.T) {
 	span := ptrace.NewSpan()
+	span.SetKind(ptrace.SpanKindServer)
 	span.Attributes().PutStr("http.route", "/users")
 
 	name, txType := GetTransactionMetricName(span)
@@ -37,6 +39,7 @@ func TestGetTransactionMetricNamRoute(t *testing.T) {
 
 func TestGetTransactionMetricNamUrlPath(t *testing.T) {
 	span := ptrace.NewSpan()
+	span.SetKind(ptrace.SpanKindServer)
 	span.Attributes().PutStr("url.path", "/owners/5")
 
 	name, txType := GetTransactionMetricName(span)
