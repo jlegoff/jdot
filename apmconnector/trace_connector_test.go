@@ -1,0 +1,30 @@
+package apmconnector
+
+import (
+	"github.com/stretchr/testify/assert"
+	"go.opentelemetry.io/collector/pdata/ptrace"
+	"go.uber.org/zap"
+	"testing"
+	"time"
+)
+
+func TestMutateOneSpan(t *testing.T) {
+	traces := ptrace.NewTraces()
+	resourceSpans := traces.ResourceSpans().AppendEmpty()
+	resourceSpans.Resource().Attributes().PutStr("service.name", "service")
+	scopeSpans := resourceSpans.ScopeSpans().AppendEmpty().Spans()
+	attrs := map[string]string{
+		"attrKey":      "attrValue",
+		"db.statement": "select * from users",
+	}
+	end := time.Now()
+	start := end.Add(-time.Second)
+	spanValues := []TestSpan{{Start: start, End: end, Name: "span", Kind: ptrace.SpanKindServer}}
+	addSpan(scopeSpans, attrs, spanValues)
+	logger, _ := zap.NewDevelopment()
+
+	MutateSpans(logger, NewSqlParser(), traces)
+	dbtable, dbtablePresent := scopeSpans.At(0).Attributes().Get(DbSqlTableAttributeName)
+	assert.True(t, dbtablePresent)
+	assert.Equal(t, dbtable.AsString(), "users")
+}

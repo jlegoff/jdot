@@ -31,7 +31,7 @@ func (c *ApmMetricConnector) ConsumeTraces(ctx context.Context, td ptrace.Traces
 }
 
 func (c *ApmMetricConnector) Start(_ context.Context, host component.Host) error {
-	c.logger.Info("Starting the APM Connector")
+	c.logger.Info("Starting the APM Metric Connector")
 	if c.config.ApdexT == 0 {
 		c.config.ApdexT = 0.5
 	}
@@ -39,7 +39,7 @@ func (c *ApmMetricConnector) Start(_ context.Context, host component.Host) error
 }
 
 func (c *ApmMetricConnector) Shutdown(context.Context) error {
-	c.logger.Info("Stopping the APM Connector")
+	c.logger.Info("Stopping the APM Metric Connector")
 	return nil
 }
 
