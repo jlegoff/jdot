@@ -10,43 +10,36 @@ import (
 	"go.uber.org/zap"
 )
 
-type ApmConnector struct {
+type ApmMetricConnector struct {
 	config *Config
 	logger *zap.Logger
 
 	metricsConsumer consumer.Metrics
-	logsConsumer    consumer.Logs
 }
 
-func (c *ApmConnector) Capabilities() consumer.Capabilities {
+func (c *ApmMetricConnector) Capabilities() consumer.Capabilities {
 	return consumer.Capabilities{MutatesData: false}
 }
 
-func (c *ApmConnector) ConsumeTraces(ctx context.Context, td ptrace.Traces) error {
-	if c.metricsConsumer != nil {
-		metrics := ConvertTraces(c.logger, c.config, td)
-		err := c.metricsConsumer.ConsumeMetrics(ctx, metrics)
-		if err != nil {
-			return err
-		}
-	}
-	if c.logsConsumer != nil {
-		logs := BuildTransactions(td)
-		return c.logsConsumer.ConsumeLogs(ctx, logs)
+func (c *ApmMetricConnector) ConsumeTraces(ctx context.Context, td ptrace.Traces) error {
+	metrics := ConvertTraces(c.logger, c.config, td)
+	err := c.metricsConsumer.ConsumeMetrics(ctx, metrics)
+	if err != nil {
+		return err
 	}
 	return nil
 }
 
-func (c *ApmConnector) Start(_ context.Context, host component.Host) error {
-	c.logger.Info("Starting the APM Connector")
+func (c *ApmMetricConnector) Start(_ context.Context, host component.Host) error {
+	c.logger.Info("Starting the APM Metric Connector")
 	if c.config.ApdexT == 0 {
 		c.config.ApdexT = 0.5
 	}
 	return nil
 }
 
-func (c *ApmConnector) Shutdown(context.Context) error {
-	c.logger.Info("Stopping the APM Connector")
+func (c *ApmMetricConnector) Shutdown(context.Context) error {
+	c.logger.Info("Stopping the APM Metric Connector")
 	return nil
 }
 

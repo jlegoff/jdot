@@ -152,7 +152,7 @@ func (transaction *Transaction) AddMeasurement(measurement *Measurement) {
 func (transaction *Transaction) ProcessDatabaseSpan(span ptrace.Span) bool {
 	if dbSystem, dbSystemPresent := span.Attributes().Get(DbSystemAttributeName); dbSystemPresent {
 		if dbOperation, dbOperationPresent := span.Attributes().Get(DbOperationAttributeName); dbOperationPresent {
-			dbTable := transaction.sqlParser.GetDbTable(span)
+			dbTable := transaction.sqlParser.AddDbTableToSpan(span)
 			attributes := pcommon.NewMap()
 			attributes.PutStr(DbOperationAttributeName, dbOperation.AsString())
 			attributes.PutStr(DbSystemAttributeName, dbSystem.AsString())

@@ -34,3 +34,7 @@ service:
       receivers: [apmconnector]
       processors: [batch]
       exporters: [otlp]
+    traces/out:
+      receivers: [apmconnector]
+      processors: [batch]
+      exporters: [otlp]
