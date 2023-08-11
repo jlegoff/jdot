@@ -158,8 +158,10 @@ func (transaction *Transaction) ProcessDatabaseSpan(span ptrace.Span) bool {
 			attributes.PutStr(DbSystemAttributeName, dbSystem.AsString())
 			attributes.PutStr(DbSqlTableAttributeName, dbTable)
 
-			if netPeerName, exists := span.Attributes().Get("net.peer.name"); exists {
-				attributes.PutStr("net.peer.name", netPeerName.AsString())
+			for _, key := range []string{"net.peer.name", "db.name"} {
+				if value, exists := span.Attributes().Get(key); exists {
+					attributes.PutStr(key, value.AsString())
+				}
 			}
 
 			timesliceName := fmt.Sprintf("Datastore/statement/%s/%s/%s", dbSystem.AsString(), dbTable, dbOperation.AsString())
