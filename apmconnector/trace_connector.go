@@ -2,6 +2,7 @@ package apmconnector
 
 import (
 	"context"
+
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/pdata/ptrace"
@@ -51,7 +52,10 @@ func MutateSpans(logger *zap.Logger, sqlparser *SqlParser, td ptrace.Traces) {
 			scopeSpan := rs.ScopeSpans().At(j)
 			for k := 0; k < scopeSpan.Spans().Len(); k++ {
 				span := scopeSpan.Spans().At(k)
-				sqlparser.AddDbTableToSpan(span)
+
+				if parsedTable, parsed := sqlparser.ParseDbTableFromSpan(span); parsed {
+					span.Attributes().PutStr(DbSqlTableAttributeName, parsedTable)
+				}
 			}
 		}
 	}

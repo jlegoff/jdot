@@ -25,17 +25,16 @@ func (sqlParser *SqlParser) ParseDbTableFromSql(sql string) (string, bool) {
 	return strings.ToLower(matches[1]), true
 }
 
-func (sqlParser *SqlParser) AddDbTableToSpan(span ptrace.Span) string {
+func (sqlParser *SqlParser) ParseDbTableFromSpan(span ptrace.Span) (string, bool) {
 	dbTable, dbTablePresent := span.Attributes().Get(DbSqlTableAttributeName)
 	if dbTablePresent {
-		return dbTable.AsString()
+		return dbTable.AsString(), false
 	} else {
 		if sql, sqlPresent := span.Attributes().Get("db.statement"); sqlPresent {
 			if parsedTable, exists := sqlParser.ParseDbTableFromSql(sql.AsString()); exists {
-				span.Attributes().PutStr(DbSqlTableAttributeName, parsedTable)
-				return parsedTable
+				return parsedTable, true
 			}
 		}
 	}
-	return "unknown"
+	return "unknown", false
 }
