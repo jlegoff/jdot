@@ -25,7 +25,7 @@ func TestConvertOneSpanToMetrics(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	config := Config{ApdexT: 0.5}
 	metrics := ConvertTraces(logger, &config, traces)
-	assert.Equal(t, 3, metrics.MetricCount())
+	assert.Equal(t, 4, metrics.MetricCount())
 	rm := metrics.ResourceMetrics().At(0)
 	serviceName, _ := rm.Resource().Attributes().Get("service.name")
 	assert.Equal(t, "service", serviceName.AsString())

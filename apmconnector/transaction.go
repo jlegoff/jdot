@@ -237,7 +237,7 @@ func (transaction *Transaction) ProcessRootSpan() bool {
 
 	err := span.Status().Code() == ptrace.StatusCodeError
 	if err {
-		transaction.IncrementErrorCount(transactionType, span.EndTimestamp())
+		transaction.IncrementErrorCount(transactionName, transactionType, span.EndTimestamp())
 	}
 
 	{
@@ -293,12 +293,25 @@ func (transaction *Transaction) GenerateApdexMetrics(span ptrace.Span, err bool,
 		attributes.PutStr("apdex.bucket", transaction.apdex.GetApdexBucket(durationSeconds))
 	}
 	transaction.resourceMetrics.IncrementSum("apm.service.apdex", attributes, span.EndTimestamp())
+
+	txAttributes := pcommon.NewMap()
+	attributes.CopyTo(txAttributes)
+	txAttributes.PutStr("transactionName", transactionName)
+	transaction.resourceMetrics.IncrementSum("apm.service.transaction.apdex", txAttributes, span.EndTimestamp())
 }
 
-func (transaction *Transaction) IncrementErrorCount(transactionType TransactionType, timestamp pcommon.Timestamp) {
-	attributes := pcommon.NewMap()
-	attributes.PutStr("transactionType", transactionType.AsString())
-	transaction.resourceMetrics.IncrementSum("apm.service.error.count", attributes, timestamp)
+func (transaction *Transaction) IncrementErrorCount(transactionName string, transactionType TransactionType, timestamp pcommon.Timestamp) {
+	{
+		attributes := pcommon.NewMap()
+		attributes.PutStr("transactionType", transactionType.AsString())
+		transaction.resourceMetrics.IncrementSum("apm.service.error.count", attributes, timestamp)
+	}
+	{
+		attributes := pcommon.NewMap()
+		attributes.PutStr("transactionName", transactionName)
+		attributes.PutStr("transactionType", transactionType.AsString())
+		transaction.resourceMetrics.IncrementSum("apm.service.transaction.error.count", attributes, timestamp)
+	}
 }
 
 func (transaction *Transaction) ProcessMeasurement(measurement *Measurement, transactionType TransactionType, transactionName string) {
