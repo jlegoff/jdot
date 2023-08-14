@@ -18,6 +18,7 @@ const (
 const (
 	WebTransactionType   TransactionType = "Web"
 	OtherTransactionType TransactionType = "Other"
+	NullTransactionType  TransactionType = "Skip"
 )
 
 func (t TransactionType) AsString() string {
@@ -56,7 +57,7 @@ type Transaction struct {
 	SdkLanguage         string
 	SpanToChildDuration map[string]int64
 	resourceMetrics     *ResourceMetrics
-	Measurements        map[string]Measurement
+	Measurements        map[string]*Measurement
 	sqlParser           *SqlParser
 	apdex               Apdex
 	RootSpan            ptrace.Span
@@ -83,7 +84,8 @@ func NewTransactionsMap(apdexT float64) *TransactionsMap {
 
 func (transactions *TransactionsMap) ProcessTransactions() {
 	for _, transaction := range transactions.Transactions {
-		transaction.ProcessServerSpan()
+		// if this returns false, we MAY not have seen all of the spans for a trace
+		transaction.ProcessRootSpan()
 	}
 }
 
@@ -92,7 +94,7 @@ func (transactions *TransactionsMap) GetOrCreateTransaction(sdkLanguage string, 
 	transaction, txExists := transactions.Transactions[traceID]
 	if !txExists {
 		transaction = &Transaction{SdkLanguage: sdkLanguage, SpanToChildDuration: make(map[string]int64),
-			resourceMetrics: resourceMetrics, Measurements: make(map[string]Measurement), sqlParser: transactions.sqlParser, apdex: transactions.apdex}
+			resourceMetrics: resourceMetrics, Measurements: make(map[string]*Measurement), sqlParser: transactions.sqlParser, apdex: transactions.apdex}
 		transactions.Transactions[traceID] = transaction
 		//fmt.Printf("Created transaction for: %s   %s\n", traceID, transaction.sdkLanguage)
 	}
@@ -112,12 +114,23 @@ func (transaction *Transaction) AddSpan(span ptrace.Span) {
 	if span.Kind() == ptrace.SpanKindServer {
 		transaction.SetRootSpan(span)
 	} else {
-		parentSpanID := span.ParentSpanID().String()
-		newDuration := DurationInNanos(span)
-		transaction.SpanToChildDuration[parentSpanID] += newDuration
+		isRoot := span.ParentSpanID().IsEmpty()
+		if isRoot {
+			transaction.SetRootSpan(span)
+		} else {
+			parentSpanID := span.ParentSpanID().String()
+			newDuration := DurationInNanos(span)
+
+			if measurement, exists := transaction.Measurements[parentSpanID]; exists {
+				measurement.ExclusiveDurationNanos -= newDuration
+			} else {
+				transaction.SpanToChildDuration[parentSpanID] += newDuration
+			}
+		}
+
 		if span.Kind() == ptrace.SpanKindClient {
 			// filter out db calls that have no parent (so no transaction)
-			if !span.ParentSpanID().IsEmpty() {
+			if !isRoot {
 				transaction.ProcessClientSpan(span)
 			}
 		} else {
@@ -130,24 +143,33 @@ func NewSimpleNameProvider(name string) func(TransactionType) string {
 	return func(t TransactionType) string { return name }
 }
 
+func (transaction *Transaction) AddMeasurement(measurement *Measurement) {
+	transaction.Measurements[measurement.SpanId] = measurement
+	measurement.ExclusiveDurationNanos = measurement.ExclusiveTime(transaction)
+	measurement.Attributes.PutStr("metricTimesliceName", measurement.MetricTimesliceName)
+}
+
 func (transaction *Transaction) ProcessDatabaseSpan(span ptrace.Span) bool {
 	if dbSystem, dbSystemPresent := span.Attributes().Get(DbSystemAttributeName); dbSystemPresent {
 		if dbOperation, dbOperationPresent := span.Attributes().Get(DbOperationAttributeName); dbOperationPresent {
-			dbTable := transaction.sqlParser.AddDbTableToSpan(span)
+			dbTable, _ := transaction.sqlParser.ParseDbTableFromSpan(span)
 			attributes := pcommon.NewMap()
+			attributes.EnsureCapacity(10)
 			attributes.PutStr(DbOperationAttributeName, dbOperation.AsString())
 			attributes.PutStr(DbSystemAttributeName, dbSystem.AsString())
 			attributes.PutStr(DbSqlTableAttributeName, dbTable)
 
-			if netPeerName, exists := span.Attributes().Get("net.peer.name"); exists {
-				attributes.PutStr("net.peer.name", netPeerName.AsString())
+			for _, key := range []string{"net.peer.name", "db.name"} {
+				if value, exists := span.Attributes().Get(key); exists {
+					attributes.PutStr(key, value.AsString())
+				}
 			}
 
 			timesliceName := fmt.Sprintf("Datastore/statement/%s/%s/%s", dbSystem.AsString(), dbTable, dbOperation.AsString())
 			measurement := Measurement{SpanId: span.SpanID().String(), MetricName: "apm.service.datastore.operation.duration", Span: span,
 				DurationNanos: DurationInNanos(span), Attributes: attributes, SegmentNameProvider: NewSimpleNameProvider(dbSystem.AsString()), MetricTimesliceName: timesliceName}
 
-			transaction.Measurements[measurement.SpanId] = measurement
+			transaction.AddMeasurement(&measurement)
 
 			return true
 		}
@@ -172,7 +194,7 @@ func (transaction *Transaction) ProcessExternalSpan(span ptrace.Span) bool {
 		measurement := Measurement{SpanId: span.SpanID().String(), MetricName: "apm.service.external.host.duration", Span: span,
 			DurationNanos: DurationInNanos(span), Attributes: attributes, SegmentNameProvider: segmentNameProvider, MetricTimesliceName: timesliceName}
 
-		transaction.Measurements[measurement.SpanId] = measurement
+		transaction.AddMeasurement(&measurement)
 		/*
 			metric := AddMetric(transaction.MetricSlice, "apm.service.transaction.external.duration")
 			dp := SetHistogramFromSpan(metric, span)
@@ -193,7 +215,7 @@ func (transaction *Transaction) ProcessGenericSpan(span ptrace.Span) bool {
 	measurement := Measurement{SpanId: span.SpanID().String(), MetricName: "newrelic.timeslice.value", Span: span,
 		DurationNanos: DurationInNanos(span), Attributes: attributes, SegmentNameProvider: NewSimpleNameProvider(transaction.SdkLanguage), MetricTimesliceName: timesliceName}
 
-	transaction.Measurements[measurement.SpanId] = measurement
+	transaction.AddMeasurement(&measurement)
 
 	return true
 }
@@ -202,17 +224,20 @@ func (transaction *Transaction) ProcessClientSpan(span ptrace.Span) bool {
 	return transaction.ProcessDatabaseSpan(span) || transaction.ProcessExternalSpan(span)
 }
 
-func (transaction *Transaction) ProcessServerSpan() {
+func (transaction *Transaction) ProcessRootSpan() bool {
 	if !transaction.IsRootSet() {
-		return
+		return false
 	}
 	span := transaction.RootSpan
 
 	transactionName, transactionType := GetTransactionMetricName(span)
+	if transactionType == NullTransactionType {
+		return true
+	}
 
 	err := span.Status().Code() == ptrace.StatusCodeError
 	if err {
-		transaction.IncrementErrorCount(transactionType, span.EndTimestamp())
+		transaction.IncrementErrorCount(transactionName, transactionType, span.EndTimestamp())
 	}
 
 	{
@@ -234,7 +259,7 @@ func (transaction *Transaction) ProcessServerSpan() {
 	breakdownBySegment := make(map[string]int64)
 	totalBreakdownNanos := int64(0)
 	for _, measurement := range transaction.Measurements {
-		transaction.ProcessMeasurement(&measurement, transactionType, transactionName)
+		transaction.ProcessMeasurement(measurement, transactionType, transactionName)
 		segmentName := measurement.SegmentNameProvider(transactionType)
 		breakdownBySegment[segmentName] += measurement.ExclusiveDurationNanos
 		totalBreakdownNanos += measurement.ExclusiveDurationNanos
@@ -254,6 +279,7 @@ func (transaction *Transaction) ProcessServerSpan() {
 		transaction.resourceMetrics.RecordHistogram(overviewMetricName, attributes,
 			span.StartTimestamp(), span.EndTimestamp(), sum)
 	}
+	return true
 }
 
 func (transaction *Transaction) GenerateApdexMetrics(span ptrace.Span, err bool, transactionName string, transactionType TransactionType) {
@@ -267,18 +293,28 @@ func (transaction *Transaction) GenerateApdexMetrics(span ptrace.Span, err bool,
 		attributes.PutStr("apdex.bucket", transaction.apdex.GetApdexBucket(durationSeconds))
 	}
 	transaction.resourceMetrics.IncrementSum("apm.service.apdex", attributes, span.EndTimestamp())
+
+	txAttributes := pcommon.NewMap()
+	attributes.CopyTo(txAttributes)
+	txAttributes.PutStr("transactionName", transactionName)
+	transaction.resourceMetrics.IncrementSum("apm.service.transaction.apdex", txAttributes, span.EndTimestamp())
 }
 
-func (transaction *Transaction) IncrementErrorCount(transactionType TransactionType, timestamp pcommon.Timestamp) {
-	attributes := pcommon.NewMap()
-	attributes.PutStr("transactionType", transactionType.AsString())
-	transaction.resourceMetrics.IncrementSum("apm.service.error.count", attributes, timestamp)
+func (transaction *Transaction) IncrementErrorCount(transactionName string, transactionType TransactionType, timestamp pcommon.Timestamp) {
+	{
+		attributes := pcommon.NewMap()
+		attributes.PutStr("transactionType", transactionType.AsString())
+		transaction.resourceMetrics.IncrementSum("apm.service.error.count", attributes, timestamp)
+	}
+	{
+		attributes := pcommon.NewMap()
+		attributes.PutStr("transactionName", transactionName)
+		attributes.PutStr("transactionType", transactionType.AsString())
+		transaction.resourceMetrics.IncrementSum("apm.service.transaction.error.count", attributes, timestamp)
+	}
 }
 
 func (transaction *Transaction) ProcessMeasurement(measurement *Measurement, transactionType TransactionType, transactionName string) {
-	exclusiveDuration := measurement.ExclusiveTime(transaction)
-	measurement.ExclusiveDurationNanos = exclusiveDuration
-	measurement.Attributes.PutStr("metricTimesliceName", measurement.MetricTimesliceName)
 	//	fmt.Printf("Name: %s total: %d exclusive: %d    id:%s\n", measurement.metricName, measurement.durationNanos, exclusiveDuration, measurement.spanId)
 
 	measurement.Attributes.PutStr("transactionType", transactionType.AsString())
@@ -293,7 +329,7 @@ func (transaction *Transaction) ProcessMeasurement(measurement *Measurement, tra
 		attributes.PutStr("transactionName", transactionName)
 
 		transaction.resourceMetrics.RecordHistogram("apm.service.transaction.overview", attributes,
-			measurement.Span.StartTimestamp(), measurement.Span.EndTimestamp(), exclusiveDuration)
+			measurement.Span.StartTimestamp(), measurement.Span.EndTimestamp(), measurement.ExclusiveDurationNanos)
 	}
 }
 
@@ -302,10 +338,17 @@ func DurationInNanos(span ptrace.Span) int64 {
 }
 
 func (measurement Measurement) ExclusiveTime(transaction *Transaction) int64 {
-	return measurement.DurationNanos - transaction.SpanToChildDuration[measurement.SpanId]
+	childDurationNanos := transaction.SpanToChildDuration[measurement.SpanId]
+	// we no longer need the summed child durations, delete that
+	delete(transaction.SpanToChildDuration, measurement.SpanId)
+	return measurement.DurationNanos - childDurationNanos
 }
 
 func GetTransactionMetricName(span ptrace.Span) (string, TransactionType) {
+	if span.Kind() != ptrace.SpanKindServer {
+		return "", NullTransactionType
+	}
+
 	if httpRoute, routePresent := span.Attributes().Get("http.route"); routePresent {
 		return GetWebTransactionMetricName(span, httpRoute.Str(), "http.route")
 	}
