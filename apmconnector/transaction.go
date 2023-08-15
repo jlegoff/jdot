@@ -2,6 +2,7 @@ package apmconnector
 
 import (
 	"fmt"
+	"strings"
 
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
@@ -23,6 +24,10 @@ const (
 
 func (t TransactionType) AsString() string {
 	return fmt.Sprintf("%s", t)
+}
+
+func (t TransactionType) MetricPrefix() string {
+	return fmt.Sprintf("%sTransaction", t)
 }
 
 func (t TransactionType) GetOverviewMetricName() string {
@@ -54,7 +59,7 @@ func (apdex Apdex) GetApdexBucket(durationInSeconds float64) string {
 }
 
 type Transaction struct {
-	SdkLanguage         string
+	name, SdkLanguage   string
 	SpanToChildDuration map[string]int64
 	resourceMetrics     *ResourceMetrics
 	Measurements        map[string]*Measurement
@@ -111,6 +116,9 @@ func (transaction *Transaction) SetRootSpan(span ptrace.Span) {
 }
 
 func (transaction *Transaction) AddSpan(span ptrace.Span) {
+	if txName, exists := span.Attributes().Get("transactionName"); exists {
+		transaction.name = txName.AsString()
+	}
 	if span.Kind() == ptrace.SpanKindServer {
 		transaction.SetRootSpan(span)
 	} else {
@@ -230,7 +238,7 @@ func (transaction *Transaction) ProcessRootSpan() bool {
 	}
 	span := transaction.RootSpan
 
-	transactionName, transactionType := GetTransactionMetricName(span)
+	transactionName, transactionType := GetTransactionMetricName(span, transaction.name)
 	if transactionType == NullTransactionType {
 		return true
 	}
@@ -344,8 +352,21 @@ func (measurement Measurement) ExclusiveTime(transaction *Transaction) int64 {
 	return measurement.DurationNanos - childDurationNanos
 }
 
-func GetTransactionMetricName(span ptrace.Span) (string, TransactionType) {
-	if span.Kind() != ptrace.SpanKindServer {
+func GetTransactionMetricName(span ptrace.Span, name string) (string, TransactionType) {
+	isWeb := span.Kind() == ptrace.SpanKindServer
+	txType := OtherTransactionType
+	if isWeb {
+		txType = WebTransactionType
+	}
+
+	if len(name) > 0 {
+		prefix := txType.MetricPrefix()
+		if !strings.HasPrefix(name, prefix) {
+			name = fmt.Sprintf("%s/%s", prefix, name)
+		}
+		return name, txType
+	}
+	if !isWeb {
 		return "", NullTransactionType
 	}
 

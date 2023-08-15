@@ -21,30 +21,55 @@ func TestGetTransactionMetricNameUnknown(t *testing.T) {
 	span := ptrace.NewSpan()
 	span.SetKind(ptrace.SpanKindServer)
 
-	name, txType := GetTransactionMetricName(span)
+	name, txType := GetTransactionMetricName(span, "")
 	assert.Equal(t, "WebTransaction/Other/unknown", name)
 	assert.Equal(t, WebTransactionType, txType)
 	assert.Equal(t, "Web", txType.AsString())
 }
 
-func TestGetTransactionMetricNamRoute(t *testing.T) {
+func TestGetTransactionMetricNameRoute(t *testing.T) {
 	span := ptrace.NewSpan()
 	span.SetKind(ptrace.SpanKindServer)
 	span.Attributes().PutStr("http.route", "/users")
 
-	name, txType := GetTransactionMetricName(span)
+	name, txType := GetTransactionMetricName(span, "")
 	assert.Equal(t, "WebTransaction/http.route/users", name)
 	assert.Equal(t, WebTransactionType, txType)
 }
 
-func TestGetTransactionMetricNamUrlPath(t *testing.T) {
+func TestGetTransactionMetricNameUrlPath(t *testing.T) {
 	span := ptrace.NewSpan()
 	span.SetKind(ptrace.SpanKindServer)
 	span.Attributes().PutStr("url.path", "/owners/5")
 
-	name, txType := GetTransactionMetricName(span)
+	name, txType := GetTransactionMetricName(span, "")
 	assert.Equal(t, "WebTransaction/Uri/owners/5", name)
 	assert.Equal(t, WebTransactionType, txType)
+}
+
+func TestGetTransactionMetricNameCustomWeb(t *testing.T) {
+	span := ptrace.NewSpan()
+	span.SetKind(ptrace.SpanKindServer)
+
+	name, txType := GetTransactionMetricName(span, "Test")
+	assert.Equal(t, "WebTransaction/Test", name)
+	assert.Equal(t, WebTransactionType, txType)
+}
+
+func TestGetTransactionMetricNameCustomOther(t *testing.T) {
+	span := ptrace.NewSpan()
+
+	name, txType := GetTransactionMetricName(span, "Test")
+	assert.Equal(t, "OtherTransaction/Test", name)
+	assert.Equal(t, OtherTransactionType, txType)
+}
+
+func TestGetTransactionMetricNameNotATransaction(t *testing.T) {
+	span := ptrace.NewSpan()
+
+	name, txType := GetTransactionMetricName(span, "")
+	assert.Equal(t, "", name)
+	assert.Equal(t, NullTransactionType, txType)
 }
 
 func TestGetOrCreateTransaction(t *testing.T) {

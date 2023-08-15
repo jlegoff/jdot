@@ -31,7 +31,8 @@ func buildTransaction(lr plog.LogRecord, span ptrace.Span) {
 	lr.Attributes().PutStr("event.domain", "newrelic.otel_collector")
 	lr.Attributes().PutStr("event.name", "Transaction")
 
-	transactionName, transactionType := GetTransactionMetricName(span)
+	// FIXME
+	transactionName, transactionType := GetTransactionMetricName(span, "")
 	lr.Attributes().PutStr("transactionType", transactionType.AsString())
 	lr.Attributes().PutStr("name", transactionName)
 
