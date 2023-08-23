@@ -14,7 +14,9 @@ receivers:
 processors:
   - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.81.0
   - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourceprocessor v0.81.0
+  - gomod: github.com/opentelemetry-collector-components/apmprocessor v0.0.1
+    path: "../opentelemetry-collector-components/processor/apmprocessor"
 
 connectors:
-  - gomod: github.com/jlegoff/jdot/apmconnector v0.0.1
-    path: "./apmconnector"
+  - gomod: github.com/opentelemetry-collector-components/apmconnector v0.0.1
+    path: "../opentelemetry-collector-components/connector/apmconnector"

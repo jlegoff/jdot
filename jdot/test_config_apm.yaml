@@ -5,6 +5,7 @@ receivers:
 
 processors:
   batch:
+  newrelicapm:
 
 exporters:
   logging:
@@ -18,23 +19,19 @@ exporters:
       api-key: $API_KEY
 
 connectors:
-  apmconnector:
+  newrelicapm:
 
 service:
   pipelines:
-    traces/in:
+    traces:
       receivers: [otlp]
-      processors: [batch]
-      exporters: [apmconnector, otlp]
+      processors: [newrelicapm, batch]
+      exporters: [newrelicapm, otlp]
     metrics/out:
-      receivers: [apmconnector]
+      receivers: [newrelicapm]
       processors: [batch]
       exporters: [file, otlp]
     logs/out:
-      receivers: [apmconnector]
-      processors: [batch]
-      exporters: [otlp]
-    traces/out:
-      receivers: [apmconnector]
+      receivers: [newrelicapm]
       processors: [batch]
       exporters: [otlp]
